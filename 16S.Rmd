@@ -1,0 +1,664 @@
+#load phyloseq object
+```{r}
+ps <- readr::read_rds('~/final_16s_arhangelsk/DATA/ps_phenotype.rds')
+```
+#load library
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(lemon)
+library(phyloseq)
+library(PNWColors)
+library(microbiome)
+library(patchwork)
+library(pheatmap)
+library(RColorBrewer)
+library(grid)
+library(NetCoMi)
+
+source("~/final_16s_arhangelsk/code/permanova.R")
+source("~/final_16s_arhangelsk/code/beta_alpha.R")
+source("~/final_16s_arhangelsk/code/DMM.R")
+
+```
+#colors
+```{r}
+c25 <- c("gray70",
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+   "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+   "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown","magenta"  ,      'orange',                     
+ 'skyBlue',
+ 'Green',                   
+ 'yellow',                      
+  'blue',                      
+  'aquamarine',
+ '#DC3220',
+  '#4B0092',
+  '#E1BE6A',
+  'black',
+ '#40B0A6',
+  '#994F00',
+  "pink3","black"
+)
+c10 <- c('#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b',
+         '#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2')
+
+size=20
+theme1 = theme(
+    plot.title = element_text(color = "black", size=size),
+    axis.text.y = element_text(color = "black", size = size),
+    axis.text.x = element_text(angle=90, hjust=1,size=size,color = 'black'),
+    legend.position = "none",
+    axis.title.y  = element_text(color = "black", size = size,angle=90),
+    axis.title.x  = element_text(color = "black", size = size),
+    #legend.key.size = unit(0.5, 'cm'),
+    text = element_text(size = size,colour ='black' ))
+
+prepare_count_table <- function (ps_obj, taxa_name_func) {
+  otu_matrix <- as(otu_table(ps_obj), 'matrix')
+  taxa_matrix <- as(tax_table(ps_obj), 'matrix')
+  taxa_matrix <- cbind(ASV=rownames(taxa_matrix), taxa_matrix)  
+  taxa_matrix_good_names <- apply(taxa_matrix, MARGIN=1, taxa_name_func)
+  # ps_meta <- as(sample_data(ps_obj), 'matrix')
+  colnames(otu_matrix) <- taxa_matrix_good_names
+  return(otu_matrix)
+}
+
+# Assuming `ps_obj` is your phyloseq object and `taxa_name_func` is defined
+taxa_name_func <- function(x) {paste0(x['ASV'],  '_', gsub('/', '', gsub("-", "", x['Genus'])))}
+
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+min_reads <- 1000
+```
+#Heatmap
+``` {r, fig.height=90, fig.width=70}
+ps_obj <- ps
+year <- '2017 16S'
+det <- 1
+prev<- 5/100
+
+# ==============================================================================
+# Filter taxa
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+
+print('After taxa filtering:')
+ps_obj
+
+
+# ==============================================================================
+# Agglomeration
+tax_glom_level <- 'Species'
+
+#This method merges species that have the same taxonomy at a certain taxonomic rank.
+if (tax_glom_level != 'ASV'){
+  ps_obj <- speedyseq::tax_glom(ps_obj, tax_glom_level, NArm = F)
+}
+
+print('After agglomeration:')
+ps_obj
+
+
+# ==============================================================================
+# Transform counts
+###Transformation to apply. The options include: 'compositional' (ie relative abundance), 'Z', 'log10', 'log10p', 'hellinger', 'identity', 'clr', 'alr', or any method from the vegan::decostand function \\centered log-ratio transformation (clr)
+transformation <- 'clr'
+ps_obj <- microbiome::transform(ps_obj, transformation)
+
+
+# ==============================================================================
+# Prepare metadata table
+ps_meta <- as(sample_data(ps_obj), 'data.frame')
+meta_for_heat <- ps_meta[, (names(ps_meta) %in% c('phenotype','batch'))]
+
+#rownames(meta_for_heat) <- rownames(ps_meta)
+
+count_mtrx <- prepare_count_table(ps_obj, taxa_name_func)
+
+cc <- as.data.frame(count_mtrx)
+rownames(meta_for_heat) <- rownames(cc)
+
+
+# ==============================================================================
+# Plot Heat
+clustering_distance_rows <- 'euclidean'
+# clustering_distance_rows <- 'binary'
+# clustering_distance_rows <- 'correlation'
+
+clustering_distance_cols <- 'euclidean'
+#clustering_distance_cols <- 'binary'
+# clustering_distance_cols <- 'correlation'
+
+filenames <- paste( '~/final_16s_arhangelsk/figures/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
+ann_colors <- list(
+   batch = c("B1"='#9e0142',
+             "B3"='#e6f598',
+             "B4"='#abdda4',
+             "B6"='#fdae61',
+             "B7"='#3288bd'),
+   phenotype = c(`1st`= "#5e4fa2",
+              `2nd` = "#26FF2E",
+              `3rd` = "#1600FC",
+              `4th`= "#FFD2D7"))
+
+p1 <- pheatmap( t(cc), cluster_rows = T, treeheight_row  = 600, treeheight_col = 700,
+          cluster_cols = T, 
+          annotation_col = meta_for_heat,
+          annotation_colors = ann_colors,
+          # annotation_row = meta_for_taxa,
+          # col= hmcols, 
+          # breaks = bk,
+          # main=paste0('Features: ', dim(t(ordered_counts)), '; Samples: ', length(rownames(ordered_counts)), '; Prevalence: ', prevalence, '; Detection: ', detection, '; Min reads: ', min_reads ),
+          silent=F,
+          clustering_distance_rows=clustering_distance_rows,
+          #clustering_distance_cols=clustering_distance_cols,
+          clustering_method='ward.D2',
+          #gaps_col = breaks,
+          cutree_rows = 30,
+          # cutree_cols = 50,
+          show_rownames = T,
+          show_colnames = T,
+          #filename= paste('tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf'), 
+          width=30, height = 80, border_color=NA
+          )
+
+save_pheatmap_pdf(p1, filenames,width=70, height = 160)
+
+p1
+
+
+```
+#permanova
+```{r,fig.width=10}
+ps_obj <- ps
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)
+                         )
+transformation <- 'compositional'
+level <- 'Genus'
+year <- '2017 16S'
+det <- 1
+prev<-10/100
+dist = "bray"
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level , NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+
+formula <- 'phenotype + batch+ sex+age_at_heath_check_10yr + education + 
+                  cancer+kidney_disease+drinking_level+ISCO_group+
+                  lipid_mod_agents_med+antidiab_med+dietary_quality_score_cat + 
+                  liver_diseases+current_smoker+total_phys_act_index'
+cols_meta <- data.frame(
+  category = c('comorbidities','technical','general','general','lifestyle','comorbidities'
+            ,'comorbidities','lifestyle','drugs','drugs','lifestyle',
+            'comorbidities','lifestyle','lifestyle','lifestyle'), 
+  row.names = c("phenotype", "batch", "sex",'age_at_heath_check_10yr','education','cancer','kidney_disease','drinking_level',
+                  'lipid_mod_agents_med','antidiab_med','dietary_quality_score_cat' , 
+                  'liver_diseases','current_smoker','total_phys_act_index','ISCO_group'))
+cols_meta$new_name <- rownames(cols_meta)
+
+methods <- c('bray','euclidean')
+# Run the plot_permanova function for both methods
+
+palette <- pnw_palette("Spring", n=length(unique(cols_meta$category)))
+
+plot_list <- map(methods, ~ {
+  tryCatch({
+    plot_permanova(ps_obj, formula, method = .x, 
+                   show_plot = TRUE, level = level, 
+                   det = det, prev = prev, 
+                   year = year, lab.size = lab.size, 
+                   size = 15, cols_meta= cols_meta,palette)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+# Check results
+print(plot_list)
+
+figure <- ggarrange(plotlist = list(plot_list[[1]][[2]],plot_list[[2]][[2]]),nrow =2,ncol = ceiling(length(plot_list)/2),labels = c('A', 'B'))
+figure
+
+#png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
+#figure
+#dev.off()
+ggsave("~/final_16s_arhangelsk/figures/permanova.png",figure,dpi=300,height = 10,width=12)
+```
+#beta and alpha 
+```{r,fig.height=10}
+ps_obj <- ps
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)
+                         )
+level <- 'ASV'
+year <- '2017 16S'
+det <- 1
+prev<-10/100
+
+
+trans <- 'compositional'
+distance_method <- 'bray' #euclidean
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev, include.lowest = F)
+ps_obj <- prune_taxa(taxas, ps_obj)
+
+ps_obj <- microbiome::transform(ps_obj, trans)
+palette <- pnw_palette("Sailboat",4,type="discrete")
+# Example usage
+beta <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "phenotype", size = 15,palette)
+
+measure <- 'Shannon'
+method <- 'wilcox.test'
+
+my_comparisons <- list( c("1st", "2nd"), c("1st", "3rd"), c("1st", "4th"),
+                        c('2nd', '3rd'), c('2nd', '4th'), c('3rd', '4th'))
+alpha <- create_alpha_plots(ps_obj,col = 'phenotype',measure = measure,method = method ,palette,my_comparisons= my_comparisons)
+
+size <- c(3,2)
+figure <- ggarrange(beta,alpha,nrow=1, widths = size,labels = c('A', 'B'))
+figure
+
+ggsave("~/final_16s_arhangelsk/figures/alpha_beta.png",figure,dpi=300,height = 10,width=14)
+```
+# dmm
+```{r,fig.width=10}
+ps_obj <- ps
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)
+                         )
+level <- 'Genus'
+det <- 1
+prev<-10/100
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev, include.lowest = F)
+ps_obj <- prune_taxa(taxas, ps_obj)
+tt <- as(tax_table(ps), 'matrix') # need species
+tt <- as.data.frame(tt)
+tt$OTU <- row.names(tt)
+tt$plot <- paste(row.names(tt), tt$Genus,tt$Species, sep = '__')
+palette <- c10
+
+
+library(DirichletMultinomial)
+library(parallel)
+  
+dat <- abundances(ps_obj)
+count <- as.matrix(t(dat))
+fit=mclapply(1:10, dmn, count = count, mc.cores = 30)
+lplc <- sapply(fit, laplace) # AIC / BIC / Laplace
+aic  <- sapply(fit, AIC) # AIC / BIC / Laplace
+bic  <- sapply(fit, BIC) # AIC / BIC / Laplace
+size=15
+df <- do.call(rbind, Map(data.frame, lplc=lplc, aic=aic, bic=bic, num=c(1:length(lplc))))
+lap <- ggplot(data=df, aes(x = num))+
+    geom_line(aes(y = lplc), color = "#33608CFF") + 
+    geom_point(aes(y = lplc)) +
+    geom_line(aes(y = aic), color="#F2994EFF", linetype="twodash") +
+    geom_point(aes(y = aic)) +
+    geom_line(aes(y = bic), color="#B81840FF", linetype="twodash") +
+    geom_point(aes(y = bic)) +
+    scale_color_identity(name = '',
+                         breaks = c('#33608CFF', '#F2994EFF', '#B81840FF'),
+                         labels = c("lplc", "aic", "bic"),
+                         guide = 'legend')+
+    ggtitle('Fit for diffrent Dirichlet Components number') +
+    xlab("Number of Dirichlet Components") + ylab("Model Fit")+ theme1
+  # ggsave(plot=p, path=wd_path, filename='Fit for diffrent Dirichlet Components number.pdf', device='pdf', width = 7, height = 5)
+lap
+column_combinations <- list(
+      c("best", "phenotype")  # Define combinations of columns for plotting
+    )
+#best <- fit[[which.min(unlist(lplc))]]
+# We want to choose k = 4
+best <- fit[[4]]
+
+plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = palette ,tt=tt,annotation_table = TRUE)
+print(plots_dmm)
+
+png("~/final_16s_arhangelsk/figures/dmm.png",width = 30, height = 32, units = "cm",res = 300)
+grid.newpage()
+grid.draw(plots_dmm)
+dev.off()
+```
+# Biochem disrtibution in dmm's cluster
+```{r,fig.width =10,fig.height = 20}
+asss <- mixture(best, assign = TRUE)
+sample_data(ps_obj)$best <- as.factor(asss)
+  
+ps_meta <- as(sample_data(ps_obj), 'data.frame')
+cols_to_keep <- c("alanine_transanimase_U.L",                                
+ "apolipoprotein_A1_g.L",                                    
+ "apolipoprotein_B_g.L" ,                                    
+ "aspartate_transanimase_U.L",                               
+ "total_cholesterol_mmol.L",                                 
+"serum_creatinine_micromol.L",                              
+"urine_creatinine_micromol.L" ,                             
+ "hs.CRP_mg.L",                                              
+"cystatin_C_mg.L",                                         
+"GGT_U.L",                                                  
+ "HbA1c_mol" ,                                               
+"HDL_cholesterol_mmol.L",                                   
+"LDL_cholesterol.mmol.L",                                   
+"Lp_a_mg.dl",                                               
+ "urine_albumin_mg.L" ,                                      
+ "haemoglobin_mol",                                        
+ "transferrin_g.L"  ,                                        
+ "triglycerides_mmol.L" ,                                   
+ "HbA1C_.",
+"log_alanine_transanimase_U.L",
+'log_aspartate_transanimase_U.L',
+'log_hs.CRP_mg.L',
+'log_GGT_U.L')
+ps_meta$log_alanine_transanimase_U.L <- log10(ps_meta$alanine_transanimase_U.L)
+ps_meta$log_aspartate_transanimase_U.L <- log10(ps_meta$aspartate_transanimase_U.L)
+ps_meta$log_hs.CRP_mg.L <- log10(ps_meta$hs.CRP_mg.L)
+ps_meta$log_GGT_U.L <- log10(ps_meta$GGT_U.L)
+
+
+
+my_comparisons <- lapply(combn(unique(ps_meta$best), 2, simplify = FALSE), as.vector)
+my_comparisons <- lapply(combn(unique(ps_meta$phenotype), 2, simplify = FALSE), as.vector)
+
+palette <- pnw_palette("Spring", n=4)
+plot_list <- list()
+# Loop through cols_to_keep if needed
+for (i in seq_along(cols_to_keep)) {
+  cols <- c('best', cols_to_keep[i])  # Dynamically create column names
+  #cols <- c('phenotype',cols_to_keep[i])
+  ps_meta[[cols[2]]] <- as.numeric(ps_meta[[cols[2]]])
+
+  # Check if columns exist
+  if (!all(cols %in% colnames(ps_meta))) {
+    stop(paste("Columns not found in ps_meta:", paste(cols[!cols %in% colnames(ps_meta)], collapse = ", ")))
+  }
+  size <- 14
+
+  # Create the plot
+  plot_list[[cols[2]]] <- ggplot(ps_meta, aes(x = !!sym(cols[1]), y = !!sym(cols[2]), fill = !!sym(cols[1]))) +
+    geom_violin(trim = FALSE, alpha = 0.1) +
+    geom_boxplot(width = 0.5, alpha = 0.75, position = position_dodge(0.9)) +
+    geom_jitter(size = 1.5, alpha = 0.5, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9)) +
+    scale_color_manual(values = palette) +
+    stat_compare_means(comparisons = my_comparisons, method = 'wilcox.test', label = "p.signif") +
+    theme_minimal()+
+    #theme_bw(base_size = 20) +
+    theme(
+      plot.title = element_text(color = "black", size = size),
+      axis.text.y = element_text(color = "black", size = size),
+      axis.text.x = element_text(angle = 90, hjust = 1, size = 15, color = 'black'),
+      legend.position = "none",
+      axis.title.y = element_text(color = "black", size = size, angle = 90),
+      axis.title.x = element_text(color = "black", size = size),
+      text = element_text(size = size, colour ='black')
+    )+
+    ggtitle(paste0(cols[2]))
+}
+
+pdf("~/final_16s_arhangelsk/figures/biochem_distribution_dmm_clusters.pdf",width = 30, height = 20)
+wrap_plots(plot_list , ncol = 7)
+dev.off()
+
+
+
+```
+
+#Create a list of subsets to network
+```{r}
+ps_obj <- ps
+level <- 'Genus'
+year='2017 16S'
+det <- 1
+prev<-10/100
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev, include.lowest = F)
+ps_obj <- prune_taxa(taxas, ps_obj)
+count_mtrx <- prepare_count_table(ps_obj, taxa_name_func)
+taxa_names(ps_obj) <- colnames(count_mtrx)
+otu_table(ps_obj) <- otu_table(count_mtrx, taxa_are_rows = FALSE)
+
+# Manually create the subsets
+ps_obj_1st <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "1st")
+count_mtrx_1st <- prepare_count_table(ps_obj_1st, taxa_name_func)
+taxa_names(ps_obj_1st) <- colnames(count_mtrx_1st)
+otu_table(ps_obj_1st) <- otu_table(count_mtrx_1st, taxa_are_rows = FALSE)
+
+ps_obj_2nd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "2nd")
+count_mtrx_2nd <- prepare_count_table(ps_obj_2nd, taxa_name_func)
+taxa_names(ps_obj_2nd) <- colnames(count_mtrx_2nd)
+otu_table(ps_obj_2nd) <- otu_table(count_mtrx_2nd, taxa_are_rows = FALSE)
+
+ps_obj_3rd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "3rd")
+count_mtrx_3rd <- prepare_count_table(ps_obj_3rd, taxa_name_func)
+taxa_names(ps_obj_3rd) <- colnames(count_mtrx_3rd)
+otu_table(ps_obj_3rd) <- otu_table(count_mtrx_3rd, taxa_are_rows = FALSE)
+
+ps_obj_4th <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "4th")
+count_mtrx_4th <- prepare_count_table(ps_obj_4th, taxa_name_func)
+taxa_names(ps_obj_4th) <- colnames(count_mtrx_4th)
+otu_table(ps_obj_4th) <- otu_table(count_mtrx_4th, taxa_are_rows = FALSE)
+
+# Create a list of the subsets
+phenotype_subsets <- list("1st" = ps_obj_1st, "2nd" = ps_obj_2nd, "3rd" = ps_obj_3rd, "4th" = ps_obj_4th)
+```
+
+# Define a function to construct and analyze network
+```{r}
+construct_analyze_networks <- function(ps_obj) {
+    
+  # Construct the network using NetCoMi
+    net_spring2 <- netConstruct(data = ps_obj,
+                                measure = "spieceasi",
+                                measurePar = list(nlambda = 25, 
+                                                  method = "mb",
+                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 100),
+                                                  lambda.min.ratio = 1e-3),
+                                normMethod = "none", 
+                                zeroMethod = "none",
+                                sparsMethod = "none", 
+                                dissFunc = "signed",
+                                verbose = 2,
+                                seed = 12345)
+    
+    # Analyze the network properties
+    props_season1 <- netAnalyze(net_spring2, 
+                                centrLCC = FALSE,
+                                avDissIgnoreInf = TRUE,
+                                sPathNorm = FALSE,
+                                clustMethod = "cluster_louvain",
+                                hubPar = c('degree', "eigenvector"),
+                                hubQuant = 0.95,
+                                lnormFit = TRUE,
+                                normDeg = FALSE,
+                                normBetw = FALSE,
+                                normClose = FALSE,
+                                normEigen = FALSE)
+    
+  # Return the list of network analysis results
+  return(props_season1)
+}
+network_analysis_results <- construct_analyze_networks(ps_obj)
+
+```
+```{r, fig.width=70, fig.height=30}
+# Define the visualization function
+visualize_network_analysis <- function(props_season1) {
+  
+  props_season1 <- props_season1
+    
+  # Optionally, you can also save the plots
+  pdf_filename <- paste0("~/final_16s_arhangelsk/figures/network_plot.pdf")
+  pdf(pdf_filename, width = 100, height = 50) 
+  plot(props_season1, 
+         sameLayout = TRUE, 
+         layoutGroup = "union",
+         hubBorderCol = "gray40",
+         nodeColor = "cluster", 
+         posCol = "purple", 
+         negCol = "darkturquoise",
+         rmSingles = "inboth", 
+         nodeSize = "eigenvector", 
+         labelScale = FALSE,
+         cexNodes = 1.5, 
+         cexLabels = 3,
+         cexHubLabels = 6,
+         cexTitle = 9)
+    
+    legend("bottom", title = "estimated association:", legend = c("+", "-"), 
+           col = c("purple", "darkturquoise"), inset = 0.2, cex = 0.1, lty = 1, lwd = 0.5, 
+           bty = "n", horiz = TRUE)
+    
+    # Close PDF device
+  dev.off()
+    
+    # Check if the file has been created
+  if (file.exists(pdf_filename)) {
+    message(paste("Successfully saved plot:", pdf_filename))
+  } else {
+    warning(paste("Failed to save plot:", pdf_filename))
+  }
+}
+
+
+# Example usage
+visualize_network_analysis(network_analysis_results)
+
+```
+# Define a function to construct and analyze groups networks
+```{r}
+construct_analyze_networks <- function(phenotype_subsets) {
+  # Get the names of the phenotype subsets
+  phenotype_names <- names(phenotype_subsets)
+  
+  # Create a list of all unique pairwise combinations
+  combinations <- combn(phenotype_names, 2, simplify = FALSE)
+  
+  # Create an empty list to store the results
+  network_analysis_results <- list()
+  
+  # Loop over all pairwise combinations of phenotype subsets
+  for (comb in combinations) {
+    phenotype1 <- comb[1]
+    phenotype2 <- comb[2]
+    
+    ps_obj_1 <- phenotype_subsets[[phenotype1]]
+    ps_obj_2 <- phenotype_subsets[[phenotype2]]
+    
+    # Construct the network using NetCoMi
+    net_spring2 <- netConstruct(data = ps_obj_1,
+                                data2 = ps_obj_2,
+                                measure = "spieceasi",
+                                measurePar = list(nlambda = 25, 
+                                                  method = "mb",
+                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 100),
+                                                  lambda.min.ratio = 1e-3),
+                                normMethod = "none", 
+                                zeroMethod = "none",
+                                sparsMethod = "none", 
+                                dissFunc = "signed",
+                                verbose = 2,
+                                seed = 12345)
+    
+    # Analyze the network properties
+    props_season1 <- netAnalyze(net_spring2, 
+                                centrLCC = FALSE,
+                                avDissIgnoreInf = TRUE,
+                                sPathNorm = FALSE,
+                                clustMethod = "cluster_louvain",
+                                hubPar = c('degree', "eigenvector"),
+                                hubQuant = 0.95,
+                                lnormFit = TRUE,
+                                normDeg = FALSE,
+                                normBetw = FALSE,
+                                normClose = FALSE,
+                                normEigen = FALSE)
+    
+    # Store the result in the list
+    combination_name <- paste(phenotype1, "vs", phenotype2, sep = "_")
+    network_analysis_results[[combination_name]] <- props_season1
+  }
+  
+  # Return the list of network analysis results
+  return(network_analysis_results)
+}
+network_analysis_results <- construct_analyze_networks(phenotype_subsets)
+```
+
+```{r, fig.width=70, fig.height=30}
+# Define the visualization function
+visualize_network_analysis <- function(network_analysis_results) {
+  for (combination_name in names(network_analysis_results)) {
+    props_season1 <- network_analysis_results[[combination_name]]
+    
+    # Optionally, you can also save the plots
+    pdf_filename <- paste0("~/final_16s_arhangelsk/figures/network_plot__", combination_name, ".pdf")
+    
+    pdf(pdf_filename, width = 100, height = 50) 
+    plot(props_season1, 
+         sameLayout = TRUE, 
+         layoutGroup = "union",
+         hubBorderCol = "gray40",
+         nodeColor = "cluster", 
+         posCol = "purple", 
+         negCol = "darkturquoise",
+         rmSingles = "inboth", 
+         nodeSize = "eigenvector", 
+         labelScale = FALSE,
+         cexNodes = 1.5, 
+         cexLabels = 3,
+         cexHubLabels = 6,
+         cexTitle = 9,
+         groupNames = strsplit(combination_name, "_vs_")[[1]])
+    
+    legend("bottom", title = "estimated association:", legend = c("+", "-"), 
+           col = c("purple", "darkturquoise"), inset = 0.2, cex = 0.1, lty = 1, lwd = 0.5, 
+           bty = "n", horiz = TRUE)
+    
+    # Close PDF device
+    dev.off()
+    
+    # Check if the file has been created
+    if (file.exists(pdf_filename)) {
+      message(paste("Successfully saved plot:", pdf_filename))
+    } else {
+      warning(paste("Failed to save plot:", pdf_filename))
+    }
+  }
+}
+
+# Example usage
+visualize_network_analysis(network_analysis_results)
+
+```
