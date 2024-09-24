@@ -1,6 +1,6 @@
 #load phyloseq object
 ```{r}
-ps <- readr::read_rds('~/final_16s_arhangelsk/DATA/ps_phenotype.rds')
+ps <- readr::read_rds('./DATA/ps_phenotype.rds')
 ```
 #load library
 ```{r}
@@ -17,10 +17,12 @@ library(pheatmap)
 library(RColorBrewer)
 library(grid)
 library(NetCoMi)
+library(DirichletMultinomial)
+library(parallel)
 
-source("~/final_16s_arhangelsk/code/permanova.R")
-source("~/final_16s_arhangelsk/code/beta_alpha.R")
-source("~/final_16s_arhangelsk/code/DMM.R")
+source("./code/permanova.R")
+source("./code/beta_alpha.R")
+source("./code/DMM.R")
 
 ```
 #colors
@@ -149,7 +151,7 @@ clustering_distance_cols <- 'euclidean'
 #clustering_distance_cols <- 'binary'
 # clustering_distance_cols <- 'correlation'
 
-filenames <- paste( '~/final_16s_arhangelsk/figures/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
+filenames <- paste( './figures/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
 ann_colors <- list(
    batch = c("B1"='#9e0142',
              "B3"='#e6f598',
@@ -248,7 +250,7 @@ figure
 #png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
 #figure
 #dev.off()
-ggsave("~/final_16s_arhangelsk/figures/permanova.png",figure,dpi=300,height = 10,width=12)
+ggsave("./figures/permanova.png",figure,dpi=300,height = 10,width=12)
 ```
 #beta and alpha 
 ```{r,fig.height=10}
@@ -287,7 +289,7 @@ size <- c(3,2)
 figure <- ggarrange(beta,alpha,nrow=1, widths = size,labels = c('A', 'B'))
 figure
 
-ggsave("~/final_16s_arhangelsk/figures/alpha_beta.png",figure,dpi=300,height = 10,width=14)
+ggsave("./figures/alpha_beta.png",figure,dpi=300,height = 10,width=14)
 ```
 # dmm
 ```{r,fig.width=10}
@@ -310,10 +312,6 @@ tt$OTU <- row.names(tt)
 tt$plot <- paste(row.names(tt), tt$Genus,tt$Species, sep = '__')
 palette <- c10
 
-
-library(DirichletMultinomial)
-library(parallel)
-  
 dat <- abundances(ps_obj)
 count <- as.matrix(t(dat))
 fit=mclapply(1:10, dmn, count = count, mc.cores = 30)
@@ -347,7 +345,7 @@ best <- fit[[4]]
 plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = palette ,tt=tt,annotation_table = TRUE)
 print(plots_dmm)
 
-png("~/final_16s_arhangelsk/figures/dmm.png",width = 30, height = 32, units = "cm",res = 300)
+png("./figures/dmm.png",width = 30, height = 32, units = "cm",res = 300)
 grid.newpage()
 grid.draw(plots_dmm)
 dev.off()
@@ -426,7 +424,7 @@ for (i in seq_along(cols_to_keep)) {
     ggtitle(paste0(cols[2]))
 }
 
-pdf("~/final_16s_arhangelsk/figures/biochem_distribution_dmm_clusters.pdf",width = 30, height = 20)
+pdf("./figures/biochem_distribution_dmm_clusters.pdf",width = 30, height = 20)
 wrap_plots(plot_list , ncol = 7)
 dev.off()
 
@@ -519,7 +517,7 @@ visualize_network_analysis <- function(props_season1) {
   props_season1 <- props_season1
     
   # Optionally, you can also save the plots
-  pdf_filename <- paste0("~/final_16s_arhangelsk/figures/network_plot.pdf")
+  pdf_filename <- paste0("./figures/network_plot.pdf")
   pdf(pdf_filename, width = 100, height = 50) 
   plot(props_season1, 
          sameLayout = TRUE, 
@@ -623,7 +621,7 @@ visualize_network_analysis <- function(network_analysis_results) {
     props_season1 <- network_analysis_results[[combination_name]]
     
     # Optionally, you can also save the plots
-    pdf_filename <- paste0("~/final_16s_arhangelsk/figures/network_plot__", combination_name, ".pdf")
+    pdf_filename <- paste0("./figures/network_plot__", combination_name, ".pdf")
     
     pdf(pdf_filename, width = 100, height = 50) 
     plot(props_season1, 
