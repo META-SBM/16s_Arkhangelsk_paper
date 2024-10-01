@@ -119,5 +119,5 @@ plot_permanova <- function(ps_obj, formula, transformation = "compositional", me
     print(combined_plot)
   }
   # Return both adonis results and the ggplot object
-  return(list(permanova_result, combined_plot))
+  return(list(permanova_result, combined_plot,res))
 }

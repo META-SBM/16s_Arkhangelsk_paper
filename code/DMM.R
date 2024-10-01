@@ -21,9 +21,12 @@ create_plot_rel <- function(cols, palette,ps_meta) {
   ggplot(dataex, aes(x = !!sym(cols[[1]]), y = rel_count, fill = !!sym(cols[[2]]))) +
     geom_bar(position = "stack", stat = "identity") +
     geom_text(aes(label = scales::percent(rel_count, accuracy = 1)), position = position_stack(vjust = 0.5), size = 6)  +
-    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]]) +
+    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]],tag = 'B') +
     scale_fill_manual(values = palette) +
-    theme_linedraw()
+    theme_linedraw()+
+    theme(axis.text.x = element_text(hjust = 1),plot.tag=element_text(size=14,face="bold"),
+          legend.text =  element_text(size = 14, family = "Fira Sans"),
+          legend.title = element_text(size = 14,family = "Fira Sans",face = "bold"))
 }
 
 # Define a function to create the plots
@@ -40,9 +43,12 @@ create_plot_ab <- function(cols, palette,ps_meta) {
   ggplot(dataex, aes(x = !!sym(cols[[1]]), y = N, fill = !!sym(cols[[2]]))) +
     geom_bar(position = "stack", stat = "identity") +
     geom_text(aes(label = N), position = position_stack(vjust = 0.5), size = 6)  +
-    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]]) +
+    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]],tag = 'B') +
     scale_fill_manual(values = palette) +
-    theme_linedraw()
+    theme_linedraw()+
+    theme(axis.text.x = element_text(hjust = 1),plot.tag=element_text(size=14,face="bold"),
+          legend.text =  element_text(size = 14, family = "Fira Sans"),
+          legend.title = element_text(size = 14,family = "Fira Sans",face = "bold"))
 }
 
 barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag = 'None',top=10,annotation_table = FALSE,
@@ -73,7 +79,7 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
     pivot_longer(cols = -c(plot, cdiff), names_to = "Sample", values_to = "Count") %>%
     group_by(Sample) %>%
     mutate(Sample = reorder(Sample, -Count))
-  df_long$plot <- str_wrap(df_long$plot, width = 20)  # Adjust width as needed
+  df_long$plot <- str_wrap(df_long$plot, width = 10)  # Adjust width as needed
   
   # Create cdiff table
   cdiff_table <- df %>% select(cdiff)
@@ -95,7 +101,7 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
     geom_bar(position = "stack", stat="identity") +
     scale_fill_manual("legend", values = palette, name = 'ASV') +
     geom_text(aes(label = round(Count,3)), position = position_stack(vjust = 0.5), size = 6) +
-    labs(x = "Number of Dirichlet mixture components", y = "Relative abundance top 10 drivers",tag = 'B') +
+    labs(x = "Number of Dirichlet mixture components", y = "Relative abundance top 10 drivers",tag = 'C') +
     theme_linedraw() +
     theme(axis.text.x = element_text(hjust = 1),plot.tag=element_text(size=14,face="bold"),
           legend.text =  element_text(size = 14, family = "Fira Sans"),
@@ -112,19 +118,22 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
     )
   }
   
-  
+
   # Create additional plots
+  grob_list <- lapply(plots, ggplotGrob)
+  gA <- grob_list[[1]]
+  gB <- ggplotGrob(p)
   
-  # Combine plots using grid.arrange
-  p1 <- grid.arrange(grobs = plots, ncol = 1,labels = 'A')
   
-  # Arrange final plot with annotation
-  p4 <- grid.arrange(plot_grid(p1,labels='A'), p, ncol=1, heights=size)
+  p <- plot_grid(gA,gB,align = "v",nrow = 2, rel_heights = c(1/3, 2/3))
+  p
+  
+
   #png('/mnt/disk1/PROJECTS/DAVID_WGS/different_figures/results_16s_for_publishing/det_5_prev_0.1_count_DMMclustering.png',height = 15, width = 15, units="in",res=500)
   #grid.arrange(plot_grid(p1,labels='A'), p, ncol=1, heights=size)
   #dev.off()
   print(df)
-  return(p4)
+  return(p)
 }
 
 create_dmm_plot <- function(ps_obj,fit,best,column_combinations,relative = TRUE,
@@ -139,7 +148,7 @@ create_dmm_plot <- function(ps_obj,fit,best,column_combinations,relative = TRUE,
     plots <- lapply(column_combinations, create_plot_ab, palette = paletteer_c("ggthemes::Sunset-Sunrise Diverging",10),ps_meta)
     
   }else{
-    plots <- lapply(column_combinations, create_plot_rel, palette = paletteer_c("ggthemes::Sunset-Sunrise Diverging",10),ps_meta)
+    plots <- lapply(column_combinations, create_plot_rel, palette = pnw_palette("Spring", n=5),ps_meta)
     
   }
   dmm_plot <- barplot_DMM(fit,best = best,ps_obj,column_combinations,plots = plots,tt = tt,annotation_table = annotation_table)
