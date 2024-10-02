@@ -8,6 +8,8 @@ library(ggplot2)
 library(ggpubr)
 library(gridExtra)
 library(lemon)
+library(ggsignif)
+library(rstatix)
 
 # Define the function to create the ordination plots
 create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "wunifrac", group, size = 10,palette) {
@@ -37,6 +39,7 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
     dplyr::left_join(means, by = group)
   anosim_res <- anosim(dist, P[[group]],parallel = 30)
   anosim_text <- paste("ANOSIM R:", round(anosim_res$statistic, 3), "p-value:", round(anosim_res$signif, 3))
+  
   # Create scatter plot with ellipses and means
   pl <-  ggplot(P, aes_string(x = "Axis.1", y = "Axis.2", color = group)) +
     geom_point(size = 1.5, alpha = 0.8) +
@@ -64,9 +67,12 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
   # Define pairwise comparisons
   unique_vals <- unique(P[[group]])
   my_comparisons <- lapply(combn(unique_vals, 2, simplify = FALSE), as.vector)
+  anno_df <- ggpubr::compare_means(as.formula(paste("Axis.1 ~", group)), data = P, method = "wilcox.test",p.adjust.method = "BH")%>%
+    add_significance("p.adj") %>%
+    add_x_position()%>%
+    add_y_position( data=P,formula = as.formula(paste("Axis.1 ~", group)),step.increase = 0.2)
   # Create violin plot for Axis.1
-  x_dens <- ggplot(P, aes_string(x = group, y = "Axis.1", color = group)) +
-    coord_flip() +
+  x_dens <- ggplot(P, aes_string(x = group, y = "Axis.1",color=group)) +
     geom_violin(trim = FALSE, alpha = 0.1) +
     geom_boxplot(width = 0.5, alpha = 0.75, position = position_dodge(0.9)) +
     geom_jitter(size = 1.5, alpha = 0.5, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9)) +
@@ -82,10 +88,18 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
       panel.grid.major = element_line(size = 0.1, linetype = 'solid', color = "gray"),
       panel.grid.minor = element_line(size = 0.1, linetype = 'solid', color = "gray")
     )+
-    stat_compare_means(comparisons = my_comparisons, method = "wilcox.test", label = "p.signif", y.position = max(P$Axis.1) * 1.1)
+    stat_pvalue_manual(
+      anno_df,  label = "p.adj.signif", tip.length = 0.02,
+      step.increase = 0.05,coord.flip = TRUE
+    )+
+    coord_flip()
+  
   # Perform Wilcoxon test for Axis.2
   test_result_axis2 <- ggpubr::compare_means(as.formula(paste("Axis.2 ~", group)), data = P, method = "wilcox.test")
-  
+  anno_df <- ggpubr::compare_means(as.formula(paste("Axis.2 ~", group)), data = P, method = "wilcox.test",p.adjust.method = "BH")%>%
+    add_significance("p.adj") %>%
+    add_x_position()%>%
+    add_y_position( data=P,formula = as.formula(paste("Axis.2 ~", group)),step.increase = 0.2)
   # Create violin plot for Axis.2
   y_dens <- ggplot(P, aes_string(x = group, y = "Axis.2", color = group)) +
     geom_violin(trim = FALSE, alpha = 0.1) +
@@ -104,7 +118,10 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
       panel.grid.major = element_line(size = 0.1, linetype = 'solid', color = "gray"),
       panel.grid.minor = element_line(size = 0.1, linetype = 'solid', color = "gray")
     ) +
-    stat_compare_means(comparisons = my_comparisons, method = "wilcox.test", label = "p.signif", y.position = max(P$Axis.2) * 1.1)
+    stat_pvalue_manual(
+      anno_df,  label = "p.adj.signif", tip.length = 0.02,
+      step.increase = 0.05,coord.flip = FALSE
+    )
   
   l <- ggplot(P, aes_string(x = "Axis.1", y = "Axis.2", color = group)) +
     geom_point(size = 2.5, alpha = 0.8) +
@@ -160,16 +177,16 @@ plot_alpha_div <- function(
   
   return(p)
 }
-create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',palette,my_comparisons){
+create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',color,my_comparisons,size=10){
+  
   
   p <- plot_alpha_div(ps_obj, group = col, color = col, measure = measure) +
   geom_violin(trim=F, alpha=0.1) +
   geom_boxplot(width=0.5, alpha=0.75, position=position_dodge(0.9)) +
-  geom_jitter(size=1.5, alpha=0.5, position=position_jitterdodge(jitter.width=0.1, dodge.width=0.9)) + scale_color_manual(values=palette)+
-  stat_compare_means(comparisons = my_comparisons,method = method, label = "p.signif") +
+  geom_jitter(size=1.5, alpha=0.5, position=position_jitterdodge(jitter.width=0.1, dodge.width=0.9)) + scale_color_manual(values=color)+
   theme_bw(base_size=20)+
   theme(
-    plot.title = element_text(color = "black", size=size),
+    plot.title = element_text(size = 25),
     axis.text.y = element_text(color = "black", size = size),
     axis.text.x = element_text(angle=90, hjust=1,size=15,color = 'black'),
     legend.position = "none",
@@ -179,5 +196,16 @@ create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.t
     text = element_text(size = size,colour ='black'))+
     scale_color_manual(values=palette)
   
+  df <- as.data.frame(p$data)
+  anno_df <- ggpubr::compare_means(as.formula(paste("value ~", group)), data = df, method = "wilcox.test",p.adjust.method = "BH")%>%
+    add_significance("p.adj") %>%
+    add_x_position()%>%
+    add_y_position( data=df,formula = as.formula(paste("value ~", group)),step.increase = 0.2)
+  
+  p <- p +
+    stat_pvalue_manual(
+    anno_df,  label = "p.adj.signif", tip.length = 0.02,
+    step.increase = 0.05,coord.flip = FALSE
+  )
   return(p)
 }
