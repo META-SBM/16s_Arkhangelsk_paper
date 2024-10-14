@@ -179,7 +179,6 @@ plot_alpha_div <- function(
 }
 create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',color,my_comparisons,size=10){
   
-  
   p <- plot_alpha_div(ps_obj, group = col, color = col, measure = measure) +
   geom_violin(trim=F, alpha=0.1) +
   geom_boxplot(width=0.5, alpha=0.75, position=position_dodge(0.9)) +
@@ -194,8 +193,9 @@ create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.t
     axis.title.x  = element_text(color = "black", size = size),
     #legend.key.size = unit(0.5, 'cm'),
     text = element_text(size = size,colour ='black'))+
-    scale_color_manual(values=palette)
+    scale_color_manual(values=color)
   
+  group <- col
   df <- as.data.frame(p$data)
   anno_df <- ggpubr::compare_means(as.formula(paste("value ~", group)), data = df, method = "wilcox.test",p.adjust.method = "BH")%>%
     add_significance("p.adj") %>%
