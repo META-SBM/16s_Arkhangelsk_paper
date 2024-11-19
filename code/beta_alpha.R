@@ -1,3 +1,4 @@
+
 library(phyloseq)
 library(ggplot2)
 library(ggpubr)
@@ -179,23 +180,23 @@ plot_alpha_div <- function(
 }
 create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',color,my_comparisons,size=10){
   
-  
   p <- plot_alpha_div(ps_obj, group = col, color = col, measure = measure) +
-  geom_violin(trim=F, alpha=0.1) +
-  geom_boxplot(width=0.5, alpha=0.75, position=position_dodge(0.9)) +
-  geom_jitter(size=1.5, alpha=0.5, position=position_jitterdodge(jitter.width=0.1, dodge.width=0.9)) + scale_color_manual(values=color)+
-  theme_bw(base_size=20)+
-  theme(
-    plot.title = element_text(size = 25),
-    axis.text.y = element_text(color = "black", size = size),
-    axis.text.x = element_text(angle=90, hjust=1,size=15,color = 'black'),
-    legend.position = "none",
-    axis.title.y  = element_text(color = "black", size = size,angle=90),
-    axis.title.x  = element_text(color = "black", size = size),
-    #legend.key.size = unit(0.5, 'cm'),
-    text = element_text(size = size,colour ='black'))+
-    scale_color_manual(values=palette)
+    geom_violin(trim=F, alpha=0.1) +
+    geom_boxplot(width=0.5, alpha=0.75, position=position_dodge(0.9)) +
+    geom_jitter(size=1.5, alpha=0.5, position=position_jitterdodge(jitter.width=0.1, dodge.width=0.9)) + scale_color_manual(values=color)+
+    theme_bw(base_size=20)+
+    theme(
+      plot.title = element_text(size = 25),
+      axis.text.y = element_text(color = "black", size = size),
+      axis.text.x = element_text(angle=90, hjust=1,size=15,color = 'black'),
+      legend.position = "none",
+      axis.title.y  = element_text(color = "black", size = size,angle=90),
+      axis.title.x  = element_text(color = "black", size = size),
+      #legend.key.size = unit(0.5, 'cm'),
+      text = element_text(size = size,colour ='black'))+
+    scale_color_manual(values=color)
   
+  group <- col
   df <- as.data.frame(p$data)
   anno_df <- ggpubr::compare_means(as.formula(paste("value ~", group)), data = df, method = "wilcox.test",p.adjust.method = "BH")%>%
     add_significance("p.adj") %>%
@@ -204,8 +205,8 @@ create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.t
   
   p <- p +
     stat_pvalue_manual(
-    anno_df,  label = "p.adj.signif", tip.length = 0.02,
-    step.increase = 0.05,coord.flip = FALSE
-  )
+      anno_df,  label = "p.adj.signif", tip.length = 0.02,
+      step.increase = 0.05,coord.flip = FALSE
+    )
   return(p)
 }

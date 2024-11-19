@@ -1,4 +1,59 @@
-#load phyloseq object
+
+
+#colours
+```{r}
+# Create a vector of colors
+colors <- c("#34b9ed", "#1d8dcf", "#024cc1", "#a100bf", "#cc7daa", "#bf4380", "#ff594c", "#f7b126", "#f0e74c", 
+     "#E05A3F", "#9467BD", "#FFC266", "#4E79A7", "#F28E2B", "#76B7B2", "#D62728", "#7F7F7F")
+
+# Create a barplot with colored bars
+bp <- barplot(rep(1, length(colors)), col = colors, border = NA, space = 0, main = "Color Palette", yaxt = 'n')
+
+# Add color names (hex codes) as labels below the bars
+axis(1, at = bp, labels = colors, las = 2, cex.axis = 0.8)
+ann_colors <- list(
+   batch = c("B1"="#34b9ed",
+             "B3"="#1d8dcf",
+             "B4"='#cc7daa',
+             "B6"='#bf4380',
+             "B7"='#f0e74c'),
+   phenotype = c(`1st`=  "#024cc1",
+              `2nd` = "#a100bf",
+              `3rd` =  "#76B7B2",
+              `4th`=  "#D62728"))
+"#34b9ed",'#cc7daa','#ff594c','#FFC266''#4E79A7'
+"#ff594c", "#9467BD"
+#1d8dcf #ff594c #9467BD #4E79A7 clusters
+```
+
+```{r}
+ann_colors <- list(
+   batch = c("B1"='#9e0142',
+             "B3"='#e6f598',
+             "B4"='#abdda4',
+             "B6"='#fdae61',
+             "B7"='#3288bd'),
+   phenotype = c(`1st`= "#5e4fa2",
+              `2nd` = "#26FF2E",
+              `3rd` = "#1600FC",
+              `4th`= "#FFD2D7"))
+```
+
+```{r}
+  category = c('comorbidities','technical','general','general','lifestyle','comorbidities'
+            ,'comorbidities','lifestyle','drugs','drugs','lifestyle',
+            'comorbidities','lifestyle','lifestyle','lifestyle')
+```
+
+
+
+
+
+
+
+
+
+
 ```{r}
 ps <- readr::read_rds('./DATA/ps_phenotype.rds')
 ```
@@ -155,21 +210,24 @@ clustering_distance_cols <- 'euclidean'
 # clustering_distance_cols <- 'correlation'
 
 filenames <- paste( './figures/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
-ann_colors <- list(
-   batch = c("B1"='#9e0142',
-             "B3"='#e6f598',
-             "B4"='#abdda4',
-             "B6"='#fdae61',
-             "B7"='#3288bd'),
-   phenotype = c(`1st`= "#5e4fa2",
-              `2nd` = "#26FF2E",
-              `3rd` = "#1600FC",
-              `4th`= "#FFD2D7"))
+  ann_colors <- list(
+   batch = c("B1"="#34b9ed",
+             "B3"="#1d8dcf",
+             "B4"='#cc7daa',
+             "B6"='#bf4380',
+             "B7"='#F28E2B'),
+   phenotype = c(`1st`=  "#024cc1",
+              `2nd` = "#a100bf",
+              `3rd` =  "#76B7B2",
+              `4th`=  "#D62728"))
 
+fontsize <- 20
 p1 <- pheatmap( t(cc), cluster_rows = T, treeheight_row  = 600, treeheight_col = 700,
           cluster_cols = T, 
           annotation_col = meta_for_heat,
           annotation_colors = ann_colors,
+          fontsize_row = fontsize, 
+          fontsize_col = fontsize,
           # annotation_row = meta_for_taxa,
           # col= hmcols, 
           # breaks = bk,
@@ -187,13 +245,138 @@ p1 <- pheatmap( t(cc), cluster_rows = T, treeheight_row  = 600, treeheight_col =
           width=30, height = 80, border_color=NA
           )
 
-save_pheatmap_pdf(p1, filenames,width=70, height = 160)
+save_pheatmap_pdf(p1, filenames,width=70, height = 100)
 
 p1
 
 
 ```
 #permanova
+```{r}
+plot_permanova <- function(ps_obj, formula, transformation = "compositional", method = "bray", show_plot = TRUE,level,det,prev,taxa_num,year,lab.size=lab.size,size=15,cols_meta,
+                           palette) {
+  
+  # Convert sample data to a data frame
+  metadf <- as.data.frame(as.matrix(ps_obj@sam_data))
+  
+  if (method == 'euclidean'){
+    transformation <- 'clr'
+    ps_obj <- microbiome::transform(ps_obj,transformation)
+  }
+  if (method == 'uunifrac'){
+    transformation <- '-'
+  }
+  
+  if ((transformation != "None" )& (method != 'euclidean') &(method != 'uunifrac')) {
+    ps_obj <- microbiome::transform(ps_obj, transformation)
+  }
+  
+  # Calculate distance matrix based on the specified method
+  dist <- phyloseq::distance(ps_obj, method =method)
+  
+  # Create formula from the string
+  formula1 <- as.formula(paste("dist ~", formula))
+  
+  # Perform adonis analysis with the specified formula
+  permanova_result <- adonis2(formula1, data = metadf,by='term',parallel = 30)
+  
+  # Process adonis results for plotting
+  res <- as.data.frame(permanova_result)
+  res$meta <- row.names(res)
+  res <- subset(res, res$meta != 'Total')
+  res$meta <- gsub('Residuals', 'other', res$meta)
+  res[which(res$`Pr(>F)` > 0.05), 'signif'] <- ' '
+  res[which(res$`Pr(>F)` <= 0.05), 'signif'] <- '*'
+  res[which(res$`Pr(>F)` <= 0.01), 'signif'] <- '**'
+  res[which(res$`Pr(>F)` <= 0.001), 'signif'] <- '***'
+  res$Feature <- res$meta
+  res$Feature <- factor(res$Feature, levels = res$Feature[order(res$R2, decreasing = FALSE)])
+  res <- rownames_to_column(res, var = "new_name")
+  res <- res %>%
+    left_join(cols_meta, by = 'new_name')
+  res <- res %>%
+    filter(new_name != "Residual")
+  # Create the ggplot object for plotting
+  main_plot <- ggplot(res, aes(x = Feature, y = R2*100, fill = category)) +
+    geom_col() +  # Use geom_col() to plot actual values
+    labs(title = "",
+         x = "",
+         y = "R2") +
+    theme_classic() +  # Optional: use a minimal theme
+    coord_flip()+
+    geom_text(aes(label=signif),  # new
+              size=3)+ 
+    theme(
+      panel_background=element_rect(fill="white"),
+      legend.position = 'top',               # Position legend at top left corner          # Anchor legend's top-left corner
+      legend.title = element_blank(), 
+      legend.text = element_text(size = 14,color="black"),
+      legend.direction = 'horizontal',
+      legend.justification = "left",
+      axis_title_y=element_blank(),
+      axis_line_x=element_line(color="black"),
+      axis_line_y=element_blank(),
+      axis.text.y=element_text(size = 14, hjust = 1, family = "sans",color="black"),
+      axis.text.x=element_text(size = 14, hjust = 1, family = "sans",color="black"),
+      axis_ticks_major_y=element_blank(),
+      panel_grid=element_blank(),
+      panel_border=element_blank(),
+    )+ 
+    facet_grid(category ~ ., scales = "free", space = "free")+
+    theme(strip.text.x = element_blank(),  # Remove x strip labels
+          strip.text.y = element_blank())+
+    guides(fill = guide_legend(nrow = 1))+
+    
+    # Use pnw_colors for filling
+    scale_fill_manual(values = palette)
+  main_plot
+  
+  total_effect_size <- round(sum(res$R2)*100,3)
+  unexplained_variance <- 100 - total_effect_size
+  
+  
+  # Prepare data for circular barplot
+  circular_data <- data.frame(
+    category = c("Explained Variance", "Unexplained Variance"),
+    value = c(total_effect_size, unexplained_variance)
+  )
+  
+  
+  circular_data$fraction <- circular_data$value / sum(circular_data$value)
+  
+  # Compute the cumulative percentages (top of each rectangle)
+  circular_data$ymax <- cumsum(circular_data$fraction)
+  
+  # Compute the bottom of each rectangle
+  circular_data$ymin <- c(0, head(circular_data$ymax, n=-1))
+  
+  # Compute label position
+  circular_data$labelPosition <- (circular_data$ymax + circular_data$ymin) / 2
+  
+  # Compute a good label
+  circular_data$label <- paste0(circular_data$category, "\n value: ", circular_data$value)
+  
+  # Make the plot
+  circular_plot <- ggplot(circular_data, aes(ymax=ymax, ymin=ymin, xmax=3.5, xmin=3, fill=category)) +
+    geom_rect() +
+    geom_label( x=4, aes(y=labelPosition, label=label), size=5) +
+    scale_fill_manual(values = pnw_palette("Shuksan2", n=2))+
+    coord_polar(theta="y") +
+    xlim(c(2, 4)) +
+    theme_void() +
+    theme(legend.position = "none")
+  
+  combined_plot <- main_plot + circular_plot + plot_layout(ncol=2)
+  
+  # Check if plot should be generated
+  if (show_plot) {
+    print(combined_plot)
+  }
+  # Return both adonis results and the ggplot object
+  return(list(permanova_result, combined_plot,res))
+}
+```
+
 ```{r,fig.width=10}
 ps_obj <- ps
 ps_obj <- subset_samples(ps_obj, 
@@ -226,7 +409,7 @@ cols_meta$new_name <- rownames(cols_meta)
 methods <- c('bray','euclidean')
 # Run the plot_permanova function for both methods
 
-palette <- pnw_palette("Spring", n=length(unique(cols_meta$category)))
+palette <- c("#34b9ed",'#cc7daa','#ff594c','#9467BD','#FFC266')
 
 plot_list <- map(methods, ~ {
   tryCatch({
@@ -251,10 +434,10 @@ figure
 #png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
 #figure
 #dev.off()
-ggsave("./figures/permanova_asv.png",figure,dpi=300,height = 10,width=12)
+ggsave("./figures/permanova_asv.png",figure,dpi=300,height = 10,width=15)
 ```
 #beta and alpha 
-```{r,fig.height=10}
+```{r,fig.width =10,fig.height = 7}
 ps_obj <- ps
 ps_obj <- subset_samples(ps_obj, 
                                !is.na(sample_data(ps_obj)$cancer) &
@@ -276,18 +459,24 @@ taxas <- core_members(ps_obj, detection = det, prevalence = prev)
 ps_obj <- prune_taxa(taxas, ps_obj)
 
 ps_obj <- microbiome::transform(ps_obj, trans)
-palette <- pnw_palette("Bay",4)
+palette <- c("#024cc1",
+              "#a100bf",
+            "#76B7B2",
+          "#D62728")
 # Example usage
 beta <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "phenotype", size = 15,palette)
 
 measure <- 'Shannon'
 method <- 'wilcox.test'
-
+palette <- c("#024cc1",
+              "#a100bf",
+            "#76B7B2",
+          "#D62728")
 my_comparisons <- list( c("1st", "2nd"), c("1st", "3rd"), c("1st", "4th"),
                         c('2nd', '3rd'), c('2nd', '4th'), c('3rd', '4th'))
 alpha <- create_alpha_plots(ps_obj,col = 'phenotype',measure = measure,method = method ,color = palette,my_comparisons= my_comparisons,size=15)
 
-size <- c(3,2)
+size <- c(4,2)
 figure <- ggarrange(beta,alpha,nrow=1, widths = size,labels = c('A', 'B'))
 figure
 figure[[1]]
@@ -340,19 +529,104 @@ lap <- ggplot(data=df, aes(x = num))+
   # ggsave(plot=p, path=wd_path, filename='Fit for diffrent Dirichlet Components number.pdf', device='pdf', width = 7, height = 5)
 lap
 column_combinations <- list(
-      c("phenotype", "best")# Define combinations of columns for plotting
+      c( "best","phenotype")# Define combinations of columns for plotting
     )
 #best <- fit[[which.min(unlist(lplc))]]
 # We want to choose k = 4
 best <- fit[[4]]
 
-plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = palette ,tt=tt,annotation_table = FALSE)
-print(plots_dmm)
-
 
 ```
+```{r,fig.width=10}
+column_combinations <- list(
+      c( "phenotype","best")# Define combinations of columns for plotting
+    )
+plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = palette ,tt=tt,annotation_table = FALSE)
+print(plots_dmm)
+```
+```{r,fig.width =5,fig.height = 4}
+  top=10
+ tag = 'None'
+ annotation_table = FALSE
+ palette <- c10
+
+  p0 <- fitted(fit[[1]], scale=TRUE)
+  pk <- fitted(best, scale=TRUE)
+  
+  diff <- rowSums(abs(pk - as.vector(p0)))
+  o <- order(diff, decreasing=TRUE)
+  cdiff <- cumsum(diff[o]) / sum(diff)
+  df <- head(cbind(Mean=p0[o], pk[o,], diff=diff[o], cdiff), top)
+  df <- as.data.frame(df)
+  
+  if(tag == 'other') {
+    # Compute values for 'other' row
+    other_row <- 1 - colSums(df)
+    df <- rbind(df, other = other_row)
+  }
+  
+  df$plot <- tt[rownames(df), "plot"]
+  df$plot[is.na(df$plot)] <- "other"
+  
+  df_selected <- df %>% select(-c(Mean,diff))
+  colnames(df_selected) <- c(seq(1,ncol(pk)), 'cdiff', 'plot')
+  
+  df_long <- df_selected %>%
+    pivot_longer(cols = -c(plot, cdiff), names_to = "Sample", values_to = "Count") %>%
+    group_by(Sample) %>%
+    mutate(Sample = reorder(Sample, -Count))
+  df_long$plot <- str_wrap(df_long$plot, width = 10)  # Adjust width as needed
+  
+  # Create cdiff table
+  cdiff_table <- df %>% select(cdiff)
+  cdiff_table$cdiff <- round(cdiff_table$cdiff, 3)
+  
+  if(tag == 'other') {
+    cdiff_table <- subset(cdiff_table, rownames(cdiff_table) != "other")
+  }
+  
+  first <- cdiff_table[1,1]
+  cdiff_table <- cdiff_table %>%
+    mutate(cdiff = cdiff - lag(cdiff))
+  
+  cdiff_table[1,1] <- first
+  colnames(cdiff_table) <- 'abs(cdiff)'
+  
+  # Create the main plot
+  p <- ggplot(df_long, aes(x = Sample, y = Count, fill = plot)) +
+    geom_bar(position = "stack", stat="identity") +
+    scale_fill_manual("legend", values = palette, name = 'ASV') +
+    geom_text(aes(label = round(Count,3)), position = position_stack(vjust = 0.5), size = 4) +
+    labs(x = "Number of Dirichlet mixture components", y = "Relative abundance top 10 drivers",tag = 'C') +
+    theme_linedraw() + labs(x = "Enterotype") +
+  theme(
+    axis.title.y = element_text(size = 16, color = "black"),
+    axis.title.x = element_text(size = 16, color = "black"),
+    axis.text = element_text(color = "black", size = 16),
+    plot.title = element_text(size = 16, color = "black"),
+     legend.text = element_text(size = 16),  # Increase legend text size
+    legend.title = element_text(size = 16) 
+  )
+  
+  # Add annotation table to the plot
+  if( annotation_table == TRUE){
+    p <- p + annotation_custom(
+      grob = tableGrob(cdiff_table),
+      xmin = ncol(pk) + 1.5,
+      xmax = ncol(pk) + 1.5,
+      ymin = sum(df_long$Count)/ncol(pk),
+      ymax = sum(df_long$Count)/ncol(pk)
+    )
+  }
+  
+  p
+
+```
+
+
+
 # Biochem disrtibution in dmm's cluster
-```{r,fig.width =20,fig.height = 10}
+```{r,fig.width =10,fig.height = 7}
 asss <- mixture(best, assign = TRUE)
 sample_data(ps_obj)$best <- as.factor(asss)
   
@@ -386,15 +660,15 @@ for (i in seq_along(cols_to_keep)) {
 ps_meta$log_alanine_transanimase_U.L <- log10(ps_meta$alanine_transanimase_U.L)
 ps_meta$log_hs.CRP_mg.L <- log10(ps_meta$hs.CRP_mg.L)
 ps_meta$log_GGT_U.L <- log10(ps_meta$GGT_U.L)
-#ps_meta$log_triglycerides_mmol.L <- log10(ps_meta$triglycerides_mmol.L)
+ps_meta$log_triglycerides_mmol.L <- log10(ps_meta$triglycerides_mmol.L)
 
-new_element <- c("log_alanine_transanimase_U.L",'log_hs.CRP_mg.L','log_GGT_U.L','triglycerides_mmol.L')
+new_element <- c("log_alanine_transanimase_U.L",'log_hs.CRP_mg.L','log_GGT_U.L','log_triglycerides_mmol.L')
 cols_to_keep <- c(new_element)
 
 my_comparisons <- list(c('1','2'),c('1','3'),c('1','4'),
                        c('2','3'),c('2','4'),c('3','4'))
 
-palette <- pnw_palette("Bay", n=4)
+palette <- c('#1d8dcf', '#ff594c', '#9467BD', "#bf4380")
 plot_list <- list()
 # Loop through cols_to_keep if needed
 for (i in seq_along(cols_to_keep)) {
@@ -458,18 +732,154 @@ create_plot_rel <- function(cols, palette,ps_meta) {
     theme_linedraw()
 }
 palette <- pnw_palette("Spring", n=5)
-age_dmm <- create_plot_rel(c('best','age_at_heath_check_10yr'),palette,ps_meta)
-sex_dmm <-create_plot_rel(c('best','sex'),palette,ps_meta)
+age_dmm <- create_plot_rel(c('phenotype','best'),c('#1d8dcf', '#ff594c', '#9467BD', "#bf4380"),ps_meta) + 
+             labs(fill = "Enterotype")+
+  theme(
+    axis.title.y = element_text(size = 20, color = "black"),
+    axis.title.x = element_text(size = 20, color = "black"),
+    axis.text = element_text(color = "black", size = 20),
+    plot.title = element_text(size = 20, color = "black"),
+     legend.text = element_text(size = 20),  # Increase legend text size
+    legend.title = element_text(size = 20) 
+  )
+sex_dmm <-create_plot_rel(c('sex','best'),c('#1d8dcf', '#ff594c', '#9467BD', "#bf4380"),ps_meta)
 
-batch_dmm <- create_plot_rel(c('best','batch'),palette,ps_meta)
+batch_dmm <- create_plot_rel(c('batch','best'),c('#1d8dcf', '#ff594c', '#9467BD',  "#bf4380"),ps_meta) + 
+             labs(fill = "Enterotype") +
+  theme(
+    axis.title.y = element_text(size = 20, color = "black"),
+    axis.title.x = element_text(size = 20, color = "black"),
+    axis.text = element_text(color = "black", size = 20),
+    plot.title = element_text(size = 20, color = "black"),
+     legend.text = element_text(size = 20),  # Increase legend text size
+    legend.title = element_text(size = 20) 
+  )
 
-p <- p + ( age_dmm/ sex_dmm/batch_dmm) + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(size=14,face="bold") )
+p <- p + ( age_dmm/ sex_dmm/batch_dmm) + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(size=14,face="bold",colour='black') )
 p
-ggsave('./figures/biochem_distribution_dmm_clusters.png',p,dpi=300,width=20,height = 10)
+ggsave('./figures/biochem_distribution_dmm_clusters.png',p,dpi=300,width=15,height = 10)
 
 
 
 ```
+```{r}
+# Define the variables
+variables <- c("batch", "sex", "age_at_heath_check_10yr", "education", "cancer",
+               "kidney_disease", "drinking_level", "lipid_mod_agents_med", 
+               "antidiab_med", "dietary_quality_score_cat", 
+               "current_smoker", "total_phys_act_index", "ISCO_group")
+
+# Create a vector of colors
+colors <- c("#34b9ed", "#1d8dcf", "#024cc1", "#a100bf", "#cc7daa", "#bf4380", "#ff594c", "#f7b126", "#f0e74c", 
+     "#E05A3F", "#9467BD", "#FFC266", "#4E79A7", "#F28E2B", "#76B7B2", "#D62728", "#7F7F7F")
+
+# Loop over variables and plot each with "phenotype" as the x-axis variable
+plots <- lapply(variables, function(var) {
+  create_plot_rel(c("phenotype", var), colors, ps_meta)
+})
+
+# Display one of the plots, for example the first
+print(plots)
+
+
+```
+```{r, fig.width=15,fig.height=10}
+wrap_plots(plots)
+```
+
+#top drivers + phenotype + batch
+
+```{r, fig.width=20,fig.height=10}
+best_list <- list(best) 
+size = 20
+tt <- as(tax_table(ps_obj), 'matrix')
+tt <- as.data.frame(tt)
+table(tt$Family)
+tt$OTU <- row.names(tt)
+tt$plot <- paste(row.names(tt),tt$Genus, sep = '__')#tt$OTU, tt$Family,tt$Species
+pp <- list()
+for (b in best_list){
+  for (k in seq(ncol(fitted(b)))) {
+  d <- melt(fitted(b))
+  colnames(d) <- c("OTU", "cluster", "value")
+
+  d <- subset(d, cluster == k) %>%
+     # Arrange OTUs by assignment strength
+     arrange(value) %>%
+     mutate(OTU = factor(OTU, levels = unique(OTU)))   %>%
+    filter(abs(value) > quantile(abs(value), 0.95
+                                 ))  
+  
+  mm <- merge(tt, d, by = 'OTU')
+  mm <- mm[order(-mm$value),]
+  
+  p <- ggplot(data=mm, aes(x=reorder(plot, value), y=value, fill=Phylum)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  coord_flip() +
+  ggtitle(paste('best Number: ', k)) +
+  scale_fill_manual(values = paletteer_c("ggthemes::Sunset-Sunrise Diverging", 3)) +
+  labs(x='taxa') +
+  theme(
+    axis.title.y = element_text(size = 20, color = "black"),
+    axis.title.x = element_text(size = 20, color = "black"),
+    axis.text = element_text(color = "black", size = 20),
+    plot.title = element_text(size = 20, color = "black"),
+     legend.text = element_text(size = 20),  # Increase legend text size
+    legend.title = element_text(size = 20) 
+  )
+  # print(p)
+  pp[[k]] <- p
+  # ggsave(plot=p, path='./tip', filename=paste("top_drivers: ", k, '.pdf'), device='pdf', width = 10, height = 13)
+}
+# pp <-do.call(grid.arrange,pp)
+grid.arrange(grobs=pp, nrow=3)
+  
+  
+  
+  
+}
+
+# pp
+# ggsave(plot=pp, path=wd_path, filename="top_drivers.pdf", device='pdf', width = 20, height = 35)
+# heatmapdmn
+```
+
+```{r, fig.width=15,fig.height=7}
+p_top_taxa <- grid.arrange(
+  grobs = c(pp),  # Combine pp with age_dmm and batch_dmm
+  nrow = 2  # Set the number of rows to 3
+)
+```
+
+
+```{r, fig.width=20,fig.height=7}
+library(patchwork)
+
+# Assuming pp is a list of plots for the first two rows
+# Arrange pp plots in two rows and add age_dmm and batch_dmm centered in the third row
+library(patchwork)
+
+# Define p_top_taxa and entero layouts separately
+p_top_taxa <- ((pp[[1]] + pp[[2]]) /      # First row with plots from pp
+               (pp[[3]] + pp[[4]]))       # Second row with more plots from pp
+               
+entero <- (age_dmm / batch_dmm)           # Stack age_dmm over batch_dmm
+
+# Combine p_top_taxa and entero with desired layout and annotations
+final_plot <- (p_top_taxa | entero) + 
+              plot_layout(widths = c(3, 1)) +
+              plot_annotation(tag_levels = list(c("A",'','','', "B", "C")))& 
+  theme(plot.tag = element_text(size = 25)) # Manually set tag levels as A, B, C
+
+# Display the final plot
+final_plot
+
+
+```
+
+
+
 #biochem_distribution sample group
 ```{r,fig.width=18,fig.height=18}
 ps_meta <- as(sample_data(ps_obj), 'data.frame')
@@ -525,7 +935,7 @@ for (i in seq_along(cols_to_keep)) {
     geom_violin(trim = FALSE, alpha = 0.1) +
     geom_boxplot(width = 0.5, alpha = 0.75, position = position_dodge(0.9)) +
     geom_jitter(size = 1.5, alpha = 0.5, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9)) +
-    scale_color_manual(values = palette) +
+    scale_fill_manual(values = c("#024cc1","#76B7B2","#a100bf","#D62728")) +
     stat_compare_means(comparisons = my_comparisons, method = 'wilcox.test', label = "p.signif",hide.ns = TRUE) +
     theme_minimal()+
     #theme_bw(base_size = 20) +
@@ -546,16 +956,98 @@ ggarrange(plotlist = plot_list,nrow=3,ncol=4)
 
 ```
 #dmm_beta
-```{r, fig.width=17,fig.height=12}
+```{r, fig.width=10,fig.height=5}
 trans <- 'compositional'
 ps_obj <- microbiome::transform(ps_obj, trans)
+palette <- c('#1d8dcf', '#ff594c', '#9467BD',  "#bf4380")
+ps_obj@sam_data$enterotype <- ps_obj@sam_data$best
+beta_dmm <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "enterotype", size = 15,palette=palette )
 
-beta_dmm <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "best", size = 15,palette=pnw_palette("Bay",4))
+  top=10
+ tag = 'None'
+ annotation_table = FALSE
+ palette <- c10
 
+  p0 <- fitted(fit[[1]], scale=TRUE)
+  pk <- fitted(best, scale=TRUE)
+  
+  diff <- rowSums(abs(pk - as.vector(p0)))
+  o <- order(diff, decreasing=TRUE)
+  cdiff <- cumsum(diff[o]) / sum(diff)
+  df <- head(cbind(Mean=p0[o], pk[o,], diff=diff[o], cdiff), top)
+  df <- as.data.frame(df)
+  
+  if(tag == 'other') {
+    # Compute values for 'other' row
+    other_row <- 1 - colSums(df)
+    df <- rbind(df, other = other_row)
+  }
+  
+  df$plot <- tt[rownames(df), "plot"]
+  df$plot[is.na(df$plot)] <- "other"
+  
+  df_selected <- df %>% select(-c(Mean,diff))
+  colnames(df_selected) <- c(seq(1,ncol(pk)), 'cdiff', 'plot')
+  
+  df_long <- df_selected %>%
+    pivot_longer(cols = -c(plot, cdiff), names_to = "Sample", values_to = "Count") %>%
+    group_by(Sample) %>%
+    mutate(Sample = reorder(Sample, -Count))
+  df_long$plot <- str_wrap(df_long$plot, width = 10)  # Adjust width as needed
+  
+  # Create cdiff table
+  cdiff_table <- df %>% select(cdiff)
+  cdiff_table$cdiff <- round(cdiff_table$cdiff, 3)
+  
+  if(tag == 'other') {
+    cdiff_table <- subset(cdiff_table, rownames(cdiff_table) != "other")
+  }
+  
+  first <- cdiff_table[1,1]
+  cdiff_table <- cdiff_table %>%
+    mutate(cdiff = cdiff - lag(cdiff))
+  
+  cdiff_table[1,1] <- first
+  colnames(cdiff_table) <- 'abs(cdiff)'
+  
+  # Create the main plot
+  p <- ggplot(df_long, aes(x = Sample, y = Count, fill = plot)) +
+    geom_bar(position = "stack", stat="identity") +
+    scale_fill_manual("legend", values = palette, name = 'ASV') +
+    geom_text(aes(label = round(Count,3)), position = position_stack(vjust = 0.5), size = 4) +
+    labs(x = "Number of Dirichlet mixture components", y = "Relative abundance top 10 drivers",tag = 'B') + labs(x = "Enterotype") +
+    theme(axis.text.x = element_text(hjust = 1,size = 16,colour = 'black'),
+           # Background elements for full white background
+  panel.background = element_rect(fill = "white"),
+  plot.background = element_rect(fill = "white"),
+  axis.line = element_line(colour = 'black'),
+          plot.tag=element_text(size=16,face="bold",colour = 'black'),
+          axis.text.y = element_text(size = 16,colour = 'black'),
+   axis.title.y = element_text(size = 16,colour = 'black'),
+   axis.title.x = element_text(size = 16,colour = 'black'),
+          legend.text =  element_text(size = 16, family = "Fira Sans"),
+          legend.title = element_text(size = 16,family = "Fira Sans",face = "bold"))
+  
+  # Add annotation table to the plot
+  if( annotation_table == TRUE){
+    p <- p + annotation_custom(
+      grob = tableGrob(cdiff_table),
+      xmin = ncol(pk) + 1.5,
+      xmax = ncol(pk) + 1.5,
+      ymin = sum(df_long$Count)/ncol(pk),
+      ymax = sum(df_long$Count)/ncol(pk)
+    )
+  }
+  
+  p
 
-p <- ggarrange(ggarrange(beta_dmm,labels='A'),plots_dmm,ncol=2)
-p
-ggsave("./figures/dmm_beta.png",p,dpi=300,height = 15,width=25)
+p_dmm <- ggarrange(
+  ggarrange(beta_dmm, labels = 'A'),  # Set label "a" for beta_dmm
+  p,                 # Set label "b" for p
+  ncol = 2
+)
+p_dmm
+ggsave("./figures/dmm_beta.png",p_dmm,dpi=300,height = 15,width=25)
 
 ```
 

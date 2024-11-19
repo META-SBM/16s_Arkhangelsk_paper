@@ -1,0 +1,367 @@
+
+
+
+```{r}
+ps <- readr::read_rds('./DATA/ps_phenotype.rds')
+ps_obj <- ps
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)                         )
+#level <- 'Genus'
+year <- '2017 16S'
+det <- 1
+prev<-5/100
+
+#ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj
+```
+
+
+```{r}
+library(phyloseq)
+library(DESeq2)
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+
+# Function to run DESeq2 and create sigtab for a given contrast
+create_sigtab <- function(ps_obj, diagdds, contrast, alpha = 0.05, minlfc = 1) {
+  res <- results(diagdds, contrast = contrast,cooksCutoff = FALSE, independentFiltering=FALSE)
+  sigtab <- res[which(res$pvalue <= alpha), ]
+  sigtab <- sigtab[which(sigtab$log2FoldChange > minlfc | sigtab$log2FoldChange < -minlfc), ]
+  sigtab <- cbind(as(sigtab, "data.frame"), as(tax_table(ps_obj)[rownames(sigtab), ], "matrix"))
+  
+  sigtab[which(sigtab$padj <= 0.05), 'signif'] <- '*'
+  sigtab[which(sigtab$padj <= 0.01), 'signif'] <- '**'
+  sigtab[which(sigtab$padj <= 0.001), 'signif'] <- '***'
+  sigtab <- sigtab[order(sigtab$log2FoldChange), ]
+  
+  asv_sigtab <- as.data.frame(sigtab)
+  asv_sigtab$taxa <- paste(row.names( asv_sigtab), asv_sigtab$Genus, sep = "_")
+  asv_sigtab <- asv_sigtab %>%
+    mutate(group = case_when(log2FoldChange > 0 ~ contrast[2], log2FoldChange < 0 ~ contrast[3]))
+  asv_sigtab$model <- 'deseq2'
+  asv_sigtab$value <- contrast[2]
+  asv_sigtab$coef <- as.numeric(asv_sigtab$log2FoldChange)
+  return(asv_sigtab)
+}
+
+# Define contrasts
+#contrasts <- list(c("phenotype2", '2nd', '1st'))
+# Define contrasts
+contrasts <- list(c("phenotype", '2nd', '1st'), c("phenotype", '3rd', '1st'), c("phenotype", '4th', '1st'),c("phenotype", '3rd','2nd'),c("phenotype", '4th', '2nd'),c("phenotype", '4th', '3rd'))
+diagdds = phyloseq_to_deseq2(ps_obj ,~ phenotype+sex+batch+age_at_heath_check_10yr)
+diagdds <- DESeq(diagdds, test="Wald", fitType="parametric", sfType = "poscounts")
+
+#,c("phenotype", '3rd','2nd'),c("phenotype", '4th', '2nd'),c("phenotype", '4th', '3rd')
+
+```
+
+```{r}
+sigtabs_list <- lapply(contrasts, function(contrast) create_sigtab(ps_obj, diagdds, contrast))
+names(sigtabs_list) <- c("2nd_vs_1st", "3rd_vs_1st","4th_vs_1st",  "3rd_vs_2nd", "4th_vs_2nd", "4th_vs_3rd")
+# Add a 'comparison' column to each data frame in the list with the corresponding list name
+sigtabs_list <- lapply(names(sigtabs_list), function(name) {
+  df <- sigtabs_list[[name]]
+  df$comparison <- name
+  return(df)
+})
+
+# Set the names back to the list
+#names(sigtabs_list) <- c("2nd_vs_1st", "3rd_vs_1st", "3rd_vs_2nd", "4th_vs_1st", "4th_vs_2nd", "4th_vs_3rd")
+
+# Print to verify the updated data frames
+sigtabs_list
+
+```
+
+```{r, fig.width=15, fig.height=4}
+combined_df <- do.call(rbind, sigtabs_list)
+combined_df <- subset(combined_df, combined_df$padj <= 0.05)
+# Example ggbarplot
+ggbarplot(combined_df, x = "taxa", y = 'coef',
+          fill = 'Phylum',
+          palette =paletteer_c("ggthemes::Sunset-Sunrise Diverging", 3),
+          sort.by.groups = FALSE,  # Don't sort inside each group
+          x.text.angle = 90,
+          lab.size = 5,
+          rotate = TRUE,
+          label = combined_df$signif, 
+          width = 0.4,
+          position = position_dodge(0.5),
+          ylab = "log2foldchange",  # Adjusted y-axis label
+          ggtheme = theme_bw()) + 
+  facet_grid(~comparison) +
+  
+  # Adjust theme for proper spacing and arrow placement
+  theme(
+    axis.text.y = element_text(color = "black", size = size),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = size, color = 'black'),
+    legend.position = "right",
+    axis.title.y = element_text(color = "black", size = size, angle = 90, vjust = 2),  # Adjust vertical placement of y-axis title
+    axis.title.x = element_text(color = "black", size = size),
+    plot.title = element_text(hjust = 0.5, size = size),
+    text = element_text(size = size, color = 'black')
+  )
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+sigtabs_list <- lapply(contrasts, function(contrast) create_sigtab(ps_obj, diagdds, contrast))
+names(sigtabs_list) <- c("2nd_vs_1st", "3rd_vs_1st","4th_vs_1st",  "3rd_vs_2nd", "4th_vs_2nd", "4th_vs_3rd")
+# Add a 'comparison' column to each data frame in the list with the corresponding list name
+sigtabs_list <- lapply(names(sigtabs_list), function(name) {
+  df <- sigtabs_list[[name]]
+  df$comparison <- name
+  return(df)
+})
+
+# Set the names back to the list
+#names(sigtabs_list) <- c("2nd_vs_1st", "3rd_vs_1st", "3rd_vs_2nd", "4th_vs_1st", "4th_vs_2nd", "4th_vs_3rd")
+
+# Print to verify the updated data frames
+sigtabs_list
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+# Create a vector of colors
+colors <- c("#34b9ed", "#1d8dcf", "#024cc1", "#a100bf", "#cc7daa", "#bf4380", "#ff594c", "#f7b126", "#f0e74c", 
+     "#E05A3F", "#9467BD", "#FFC266", "#4E79A7", "#F28E2B", "#76B7B2", "#D62728", "#7F7F7F")
+
+# Create a barplot with colored bars
+bp <- barplot(rep(1, length(colors)), col = colors, border = NA, space = 0, main = "Color Palette", yaxt = 'n')
+
+# Add color names (hex codes) as labels below the bars
+axis(1, at = bp, labels = colors, las = 2, cex.axis = 0.8)
+
+
+```
+
+#load deseq results
+```{r}
+deseq <- readRDS('./DATA/deseq2_res_table.rds')
+deseq <- as.data.frame(deseq)
+```
+```{r, fig.width=10, fig.height=3}
+library(ggplot2)
+library(grid)
+
+# Define color palette for comparison values
+comparison_palette <- c(
+  "1st" = "#1d8dcf",  # Color for negative (before _vs_)
+  "2nd" = "#a100bf",  # Color for positive (after _vs_)
+  "3rd" = "#76B7B2",
+  "4th" = "#D62728"
+)
+
+# Extract the components of the comparison to apply color mapping
+deseq$comparison_value <- ifelse(deseq$coef < 0, 
+                                sub("_vs_.*", "", deseq$comparison),  # Extract value before _vs_ for negative
+                                sub(".*_vs_", "", deseq$comparison))  # Extract value after _vs_ for positive
+
+# Create the bar plot
+ggbarplot(deseq, x = "taxa", y = 'coef',
+           fill = 'Phylum',  # Use the new comparison_part column for fill
+          palette = comparison_palette,  # Apply the defined color palette
+          sort.by.groups = FALSE,  # Don't sort inside each group
+          x.text.angle = 90,
+          lab.size = 5,
+          rotate = TRUE,
+          label = deseq$signif, 
+          width = 0.4,
+          position = position_dodge(0.5),
+          ylab = "Coefficient",  # Adjusted y-axis label
+          ggtheme = theme_bw()) + 
+  facet_wrap(~comparison) +
+  
+  # Adjust theme for proper spacing and text sizing
+  theme(
+    axis.text.y = element_text(color = "black", size = size),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = size, color = 'black'),
+    legend.position = "right",
+    axis.title.y = element_text(color = "black", size = size, angle = 90, vjust = 2),  # Adjust vertical placement of y-axis title
+    axis.title.x = element_text(color = "black", size = size),
+    plot.title = element_text(hjust = 0.5, size = size),
+    text = element_text(size = size, color = 'black')
+  ) +
+  scale_fill_manual(values = comparison_palette)  # Manually set colors based on the comparison parts
+
+```
+
+
+```{r, fig.width=10, fig.height=3}
+
+library(ggplot2)
+library(grid)  # Needed for unit()
+
+# Example ggbarplot
+ggbarplot(deseq, x = "taxa", y = 'coef',
+          fill = 'Phylum',
+          palette = sample(colors),
+          sort.by.groups = FALSE,  # Don't sort inside each group
+          x.text.angle = 90,
+          lab.size = 5,
+          rotate = TRUE,
+          label = deseq$signif, 
+          width = 0.4,
+          position = position_dodge(0.5),
+          ylab = "log2foldchange",  # Adjusted y-axis label
+          ggtheme = theme_bw()) + 
+  facet_wrap(~comparison) +
+  
+  # Adjust theme for proper spacing and arrow placement
+  theme(
+    axis.text.y = element_text(color = "black", size = size),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = size, color = 'black'),
+    legend.position = "right",
+    axis.title.y = element_text(color = "black", size = size, angle = 90, vjust = 2),  # Adjust vertical placement of y-axis title
+    axis.title.x = element_text(color = "black", size = size),
+    plot.title = element_text(hjust = 0.5, size = size),
+    text = element_text(size = size, color = 'black')
+  )
+
+
+
+
+  
+```
+
+
+```{r, fig.width=10, fig.height=3}
+
+library(ggplot2)
+library(grid)  # Needed for unit()
+
+# Example ggbarplot
+ggbarplot(deseq, x = "taxa", y = 'coef',
+          fill = 'Phylum',
+          palette = sample(colors),
+          sort.by.groups = FALSE,  # Don't sort inside each group
+          x.text.angle = 90,
+          lab.size = 5,
+          rotate = TRUE,
+          label = deseq$signif, 
+          width = 0.4,
+          position = position_dodge(0.5),
+          ylab = "Coefficient",  # Adjusted y-axis label
+          ggtheme = theme_bw()) + 
+  facet_wrap(~comparison) +
+  
+  # Adjust theme for proper spacing and arrow placement
+  theme(
+    axis.text.y = element_text(color = "black", size = size),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = size, color = 'black'),
+    legend.position = "right",
+    axis.title.y = element_text(color = "black", size = size, angle = 90, vjust = 2),  # Adjust vertical placement of y-axis title
+    axis.title.x = element_text(color = "black", size = size),
+    plot.title = element_text(hjust = 0.5, size = size),
+    text = element_text(size = size, color = 'black')
+  )
+
+
+
+
+  
+```
+
+
+
+```{r, fig.width=5, fig.height=3}
+library(ggplot2)
+library(cowplot)
+
+# Define a sample color palette (you can customize this as needed)
+arrow_colors <- c("1st" = "red", "2nd" = "blue", "3rd" = "green", "4th" = "purple")
+
+# Loop through each comparison, generate plots, and combine them
+for (comp in comparisons) {
+  
+  # Split the comparison into the two components (before and after "_vs_")
+  comparison_parts <- strsplit(comp, "_vs_")[[1]]
+  negative_name <- comparison_parts[1]  # The "before" value (e.g., "1st")
+  positive_name <- comparison_parts[2]  # The "after" value (e.g., "2nd")
+  
+  # Filter the deseq data for the current comparison
+  deseq_subset <- subset(deseq, comparison == comp)
+  
+  # Create the bar plot for the current comparison
+  p <- ggbarplot(deseq_subset, x = "taxa", y = 'coef',
+                 fill = 'Phylum',
+                 palette = sample(colors),
+                 sort.by.groups = FALSE,  # Don't sort inside each group
+                 x.text.angle = 90,
+                 lab.size = 5,
+                 rotate = TRUE,
+                 label = deseq_subset$signif, 
+                 width = 0.4,
+                 position = position_dodge(0.5),
+                 ylab = "Coefficient",  # y-axis label for coef
+                 ggtheme = theme_bw()) +
+    ggtitle(paste("Comparison:", comp)) +  # Add title for each comparison
+    # Adjust theme for proper placement
+    theme(
+      axis.text.y = element_text(color = "black", size = 12),
+      axis.text.x = element_text(angle = 90, hjust = 1, size = 12, color = 'black'),
+      legend.position = "right",
+      axis.title.y = element_text(color = "black", size = 14, angle = 90, vjust = 2),  # Move y-axis label slightly up
+      axis.title.x = element_text(color = "black", size = 14),
+      plot.title = element_text(hjust = 0.5, size = 14),
+      text = element_text(size = 12, color = 'black'),
+      # Increase bottom margin to make space for the arrows
+      plot.margin = unit(c(1, 1, 5, 1), "cm")
+    )
+  
+arrow_plot <- ggplot() +
+  # Negative arrow (left side) from 0 to -1 on x-axis (adjusted for proper length and start)
+  geom_segment(aes(x = 0, y = 0, xend = -0.5, yend = 0), 
+               arrow = arrow(length = unit(0.1, "cm")), size = 1.5, color = arrow_colors[negative_name]) +
+  geom_text(aes(x = -1, y = 0, label = negative_name), 
+            hjust = 1, vjust = -1.5, size = 5, fontface = "bold.italic", color = arrow_colors[negative_name]) +
+  
+  # Positive arrow (right side) from 0 to +1 on x-axis (adjusted for proper length and start)
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 0), 
+               arrow = arrow(length = unit(0.1, "cm")), size = 1.5, color = arrow_colors[positive_name]) +
+  geom_text(aes(x = 1, y = 0, label = positive_name), 
+            hjust = 0, vjust = -1.5, size = 5, fontface = "bold.italic", color = arrow_colors[positive_name]) +
+  theme_void()
+  # Combine the bar plot and the arrow plot
+  combined_plot <- plot_grid(p, arrow_plot, ncol = 1, rel_heights = c(4, 0.2))
+  
+  # Print the combined plot for the current comparison
+  print(combined_plot)
+}
+
+```
+
+
+
