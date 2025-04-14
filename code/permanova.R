@@ -1,19 +1,36 @@
+library(tibble)
+library(ggtext)
+library(glue)
+library(microViz)
+library(PNWColors)
+library(showtext)
+font_add_google("Montserrat", "montserrat")
 
 plot_permanova <- function(ps_obj, formula, transformation = "compositional", method = "bray", show_plot = TRUE,level,det,prev,taxa_num,year,lab.size=lab.size,size=15,cols_meta,
-                           palette) {
+                           palette,threshold,threshold_loc_y,list_order) {
   
   # Convert sample data to a data frame
   metadf <- as.data.frame(as.matrix(ps_obj@sam_data))
+  
+  if(method == 'euclidean'){
+    distance <- 'aitchison'
+  }else{
+    distance <- method 
+  }
+  #bd1 <- ps_obj %>%
+  #  dist_calc(distance) %>%
+  #  dist_bdisp(variables = cols_meta$new_name) %>%
+   # bdisp_get()
   
   if (method == 'euclidean'){
     transformation <- 'clr'
     ps_obj <- microbiome::transform(ps_obj,transformation)
   }
-  if (method == 'uunifrac'){
-    transformation <- '-'
+  if ((method == 'unifrac') | (method =='wunifrac')){
+    transformation <- "None"
   }
   
-  if ((transformation != "None" )& (method != 'euclidean') &(method != 'uunifrac')) {
+  if ((transformation != "None" )& (method != 'euclidean') &(method != 'unifrac')) {
     ps_obj <- microbiome::transform(ps_obj, transformation)
   }
   
@@ -35,47 +52,77 @@ plot_permanova <- function(ps_obj, formula, transformation = "compositional", me
   res[which(res$`Pr(>F)` <= 0.05), 'signif'] <- '*'
   res[which(res$`Pr(>F)` <= 0.01), 'signif'] <- '**'
   res[which(res$`Pr(>F)` <= 0.001), 'signif'] <- '***'
-  res$Feature <- res$meta
+  res$Feature <- as.character(res$meta)
+  
   res$Feature <- factor(res$Feature, levels = res$Feature[order(res$R2, decreasing = FALSE)])
-  res <- rownames_to_column(res, var = "new_name")
+  #res$Feature <- as.character(res$Feature)
+  #res$Feature <- ifelse(nchar(res$Feature) > 10, 
+  #                      str_replace_all(res$Feature, "_", "\n"), 
+  #                      res$Feature)
+  res$Feature <- str_wrap(res$Feature, width = 1)
+  res <- tibble::rownames_to_column(res, var = "new_name")
   res <- res %>%
     left_join(cols_meta, by = 'new_name')
   res <- res %>%
     filter(new_name != "Residual")
-  # Create the ggplot object for plotting
-  main_plot <- ggplot(res, aes(x = Feature, y = R2*100, fill = category)) +
+  res <- res %>%
+    mutate(Original_Feature = Feature)
+  res$Original_Feature <- factor(res$Original_Feature, 
+                                 levels = c('phenotype','age','sex', 'education', 'ISCO',
+                                            'physical_activity', 'diet_quality', 'smoking_status', 'drinking_level','cancer','kidney_disease','batch'))
+  res <- res %>%
+    mutate(  Feature = ifelse((signif == '*') | (signif == '**') | (signif == '***') ,
+                              glue("**{Feature}**"),  # Use glue to format as bold
+                              glue("{Feature}")))
+  res <- res %>%
+    group_by(category) %>%          # Group by 'category'
+    arrange(desc(R2), .by_group = TRUE) %>%  # Sort within each group by 'R2' in descending order
+    ungroup() 
+  res$Feature <- factor(res$Feature, levels = res$Feature[order(-res$R2)])
+  main_plot <- ggplot(res, aes(x = Feature, y = R2, fill = category,order = R2)) +
     geom_col() +  # Use geom_col() to plot actual values
     labs(title = "",
          x = "",
          y = "R2") +
     theme_classic() +  # Optional: use a minimal theme
     coord_flip()+
-    geom_text(aes(label=signif),  # new
-              size=3)+ 
+    geom_label(data = res %>% filter(signif != ' '),
+               aes(label = signif,color='PERMANOVA \n significance'),  # Set fontface based on significance
+              size = 3, hjust = -0.2,fill='white')+
+    #geom_label(data = res %>% filter(signif_disp != ' '),
+    #           aes(label = signif_disp,color = 'PERMDISP \n significance'),  # Set fontface based on significance
+    #           size = 3,fill='white', hjust = 1)+
     theme(
-      panel_background=element_rect(fill="white"),
-      legend.position = 'top',               # Position legend at top left corner          # Anchor legend's top-left corner
+      panel.background = element_rect(fill="white"),
+      legend.position = 'top',               # Position legend at top left corner
       legend.title = element_blank(), 
-      legend.text = element_text(),
+      legend.text = element_text(size=12,family = "montserrat",color='black'),
       legend.direction = 'horizontal',
       legend.justification = "left",
-      axis_title_y=element_blank(),
-      axis_line_x=element_line(color="black"),
-      axis_line_y=element_blank(),
-      axis.text.y=element_text(size = 14, hjust = 1, family = "sans"),
-      axis.text.x=element_text(size = 14, hjust = 1, family = "sans"),
-      axis_ticks_major_y=element_blank(),
-      panel_grid=element_blank(),
-      panel_border=element_blank(),
+      axis.title.y = element_blank(),
+      axis.line.x = element_line(color="black"),
+      axis.line.y = element_blank(),
+      axis.text.y = element_markdown(size=12, hjust=1,family = "montserrat",color='black',linewidth = 1.2),
+      axis.text.x = element_text(size=12, hjust=1,family = "montserrat",color='black'),
+      axis.ticks.y = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      strip.text.x = element_blank(),  # Remove x strip labels
+      strip.text.y = element_blank()
     )+ 
     facet_grid(category ~ ., scales = "free", space = "free")+
-    theme(strip.text.x = element_blank(),  # Remove x strip labels
-          strip.text.y = element_blank())+
-    guides(fill = guide_legend(nrow = 1))+
+    guides(fill = guide_legend(nrow = 1)) +
     
     # Use pnw_colors for filling
-    scale_fill_manual(values = palette)
-  main_plot
+    scale_fill_manual(values = palette)+
+    scale_color_manual(values=c("PERMANOVA \n significance"="black"))+
+    #scale_fill_manual(values = c("Significance"="white", "Dispersion"="black"))+
+    geom_hline(yintercept = threshold, col = "grey30", lty = "dashed")+
+    ggtitle(paste('method:',distance))
+  #annotate("text", x = 0.6, y = 0.6, label = "major contribution",
+  #           family = "Fira Sans", size = 3, hjust = 0) 
+  plot(main_plot)
   
   total_effect_size <- round(sum(res$R2)*100,3)
   unexplained_variance <- 100 - total_effect_size
@@ -111,8 +158,8 @@ plot_permanova <- function(ps_obj, formula, transformation = "compositional", me
     xlim(c(2, 4)) +
     theme_void() +
     theme(legend.position = "none")
-  
-  combined_plot <- main_plot + circular_plot + plot_layout(ncol=2)
+  #plot(circular_plot)
+  combined_plot <- main_plot + circular_plot + plot_layout(ncol=2,widths = c(2,1)) 
   
   # Check if plot should be generated
   if (show_plot) {

@@ -52,7 +52,7 @@ create_plot_ab <- function(cols, palette,ps_meta) {
 }
 
 barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag = 'None',top=10,annotation_table = FALSE,
-                        plots,tt) {
+                        plots,tt,palette) {
   
   p0 <- fitted(fit[[1]], scale=TRUE)
   pk <- fitted(best, scale=TRUE)
@@ -72,17 +72,19 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
   df$plot <- tt[rownames(df), "plot"]
   df$plot[is.na(df$plot)] <- "other"
   
-  df_selected <- df %>% select(-c(Mean,diff))
+  df_selected <- df %>% 
+    dplyr::select(-c(Mean,diff))
   colnames(df_selected) <- c(seq(1,ncol(pk)), 'cdiff', 'plot')
   
   df_long <- df_selected %>%
     pivot_longer(cols = -c(plot, cdiff), names_to = "Sample", values_to = "Count") %>%
     group_by(Sample) %>%
     mutate(Sample = reorder(Sample, -Count))
-  df_long$plot <- str_wrap(df_long$plot, width = 10)  # Adjust width as needed
+  df_long$plot <- str_wrap(df_long$plot, width = 3)  # Adjust width as needed
   
   # Create cdiff table
-  cdiff_table <- df %>% select(cdiff)
+  cdiff_table <- df %>% 
+    dplyr::select(cdiff)
   cdiff_table$cdiff <- round(cdiff_table$cdiff, 3)
   
   if(tag == 'other') {
@@ -95,17 +97,22 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
   
   cdiff_table[1,1] <- first
   colnames(cdiff_table) <- 'abs(cdiff)'
+  df_long$Count <- df_long$Count *100
   
   # Create the main plot
   p <- ggplot(df_long, aes(x = Sample, y = Count, fill = plot)) +
     geom_bar(position = "stack", stat="identity") +
     scale_fill_manual("legend", values = palette, name = 'ASV') +
-    geom_text(aes(label = round(Count,3)), position = position_stack(vjust = 0.5), size = 6) +
-    labs(x = "Number of Dirichlet mixture components", y = "Relative abundance top 10 drivers",tag = 'C') +
+    geom_text(aes(label = paste(round(Count,1),' %')), position = position_stack(vjust = 0.5), size = 6) +
+    labs(x = "Enterotype", y = paste("Relative abundance top (%)", top, "drivers")) +
     theme_linedraw() +
-    theme(axis.text.x = element_text(hjust = 1),plot.tag=element_text(size=14,face="bold"),
-          legend.text =  element_text(size = 14, family = "Fira Sans"),
-          legend.title = element_text(size = 14,family = "Fira Sans",face = "bold"))
+    theme(axis.text.x = element_text(hjust = 1,size = 10),
+          legend.text =  element_text(size = 12),
+          legend.title = element_text(size = 14,face = "bold"),
+          legend.position = 'right',
+          legend.title.position = "top",
+          legend.spacing.x = unit(1, "cm"))+
+    guides(fill = guide_legend(keywidth = 1.5))
   
   # Add annotation table to the plot
   if( annotation_table == TRUE){
@@ -125,7 +132,7 @@ barplot_DMM <- function(fit, best, ps_obj, column_combinations,size=c(1,3), tag 
   gB <- ggplotGrob(p)
   
   
-  p <- plot_grid(gA,gB,align = "v",nrow = 2, rel_heights = c(1/3, 2/3))
+  #p <- plot_grid(gA,gB,align = "v",nrow = 2, rel_heights = c(1/3, 2/3))
   p
   
 
@@ -145,13 +152,13 @@ create_dmm_plot <- function(ps_obj,fit,best,column_combinations,relative = TRUE,
   ps_meta <- as(sample_data(ps_obj), 'data.frame')
   
   if(relative == FALSE){
-    plots <- lapply(column_combinations, create_plot_ab, palette = paletteer_c("ggthemes::Sunset-Sunrise Diverging",10),ps_meta)
+    plots <- lapply(column_combinations, create_plot_ab, palette = palette,ps_meta)
     
   }else{
-    plots <- lapply(column_combinations, create_plot_rel, palette = pnw_palette("Spring", n=5),ps_meta)
+    plots <- lapply(column_combinations, create_plot_rel, palette = palette,ps_meta)
     
   }
-  dmm_plot <- barplot_DMM(fit,best = best,ps_obj,column_combinations,plots = plots,tt = tt,annotation_table = annotation_table)
+  dmm_plot <- barplot_DMM(fit,best = best,ps_obj,column_combinations,plots = plots,tt = tt,top = top,annotation_table = annotation_table,palette = palette)
 
   return(dmm_plot)
 

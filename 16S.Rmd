@@ -1,6 +1,16 @@
 #load phyloseq object
 ```{r}
 ps <- readr::read_rds('./DATA/ps_phenotype.rds')
+
+#rank_names(ps)
+meta <- as(ps@sam_data,'data.frame')
+unique_ids <- meta %>%
+  distinct(ID_KYH, .keep_all = TRUE)
+otu <- ps@otu_table
+tax <- ps@tax_table
+ps <- phyloseq(otu,tax, sample_data(unique_ids))
+#duplicate(ps@sam_data$ID_KYH)
+#ps <- readRDS('~/ps_17_22.rds')
 ```
 #load library
 ```{r}
@@ -22,10 +32,14 @@ library(parallel)
 library(purrr)
 library(vegan)
 library(tibble)
+library(tidyverse)
+library(dplyr)
+library(reshape2)
 
 source("./code/permanova.R")
 source("./code/beta_alpha.R")
 source("./code/DMM.R")
+
 
 ```
 #colors
@@ -59,7 +73,15 @@ c25 <- c("gray70",
 )
 c10 <- c('#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b',
          '#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2')
+colors <- c('#34b9ed','#a100bf',
+'#f7b126','#bf4380','#1d8dcf',
+'#024cc1',
+'#f0e74c','#b2d1e3',
+'#cc7daa',
 
+'#ff594c'
+)
+  
 size=20
 theme1 = theme(
     plot.title = element_text(color = "black", size=size),
@@ -82,7 +104,7 @@ prepare_count_table <- function (ps_obj, taxa_name_func) {
 }
 
 # Assuming `ps_obj` is your phyloseq object and `taxa_name_func` is defined
-taxa_name_func <- function(x) {paste0(x['ASV'],  '_', gsub('/', '', gsub("-", "", x['Genus'])))}
+taxa_name_func <- function(x) {paste0(x['Genus'])}#,  '_', gsub('/', '', gsub("-", "", x['Genus'])))}#, gsub('/', '', gsub("-", "", x['Species'])))}
 
 save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
    stopifnot(!missing(x))
@@ -99,7 +121,7 @@ min_reads <- 1000
 ps_obj <- ps
 year <- '2017 16S'
 det <- 1
-prev<- 5/100
+prev<- 10/100
 
 # ==============================================================================
 # Filter taxa
@@ -113,7 +135,7 @@ ps_obj
 
 # ==============================================================================
 # Agglomeration
-tax_glom_level <- 'Species'
+tax_glom_level <- 'Genus'
 
 #This method merges species that have the same taxonomy at a certain taxonomic rank.
 if (tax_glom_level != 'ASV'){
@@ -135,6 +157,7 @@ ps_obj <- microbiome::transform(ps_obj, transformation)
 # Prepare metadata table
 ps_meta <- as(sample_data(ps_obj), 'data.frame')
 meta_for_heat <- ps_meta[, (names(ps_meta) %in% c('phenotype','batch'))]
+meta_for_heat <- ps_meta[, (names(ps_meta) %in% c('phenotype','YEAR'))]
 
 #rownames(meta_for_heat) <- rownames(ps_meta)
 
@@ -155,6 +178,9 @@ clustering_distance_cols <- 'euclidean'
 # clustering_distance_cols <- 'correlation'
 
 filenames <- paste( './figures/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
+
+filenames <- paste( '~/DAVID_WGS/taxa/inStrain/','tax_glom_level_', tax_glom_level, '_transform_', transformation, '_det', det, '_prev',prev, '_minreads', min_reads, '_clust_dist_cols_', clustering_distance_cols,  '_clust_dist_rows_', clustering_distance_rows,' year:',year, '.pdf')
+
 ann_colors <- list(
    batch = c("B1"='#9e0142',
              "B3"='#e6f598',
@@ -192,49 +218,87 @@ save_pheatmap_pdf(p1, filenames,width=70, height = 160)
 p1
 
 
+heatmap_object <- Heatmap(t(otu_table),
+                          width=100, height = 200,
+                          row_names_gp    = gpar(fontsize = 5),
+                          column_names_gp = gpar(fontsize = 0),
+                          column_names_rot = 45,
+                          name = 'MAG abundance(compositional)',
+                          heatmap_legend_param = list(direction = "horizontal"))
+draw(heatmap_object,heatmap_legend_side = "top", annotation_legend_side = "top",merge_legend = T)
 ```
 #permanova
 ```{r,fig.width=10}
+source("./code/permanova.R")
 ps_obj <- ps
+ps_obj@sam_data$bmi_group
 ps_obj <- subset_samples(ps_obj, 
                                !is.na(sample_data(ps_obj)$cancer) &
                                !is.na(sample_data(ps_obj)$liver_diseases) &
                                !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
                                  !is.na(sample_data(ps_obj)$total_phys_act_index)                         )
-#level <- 'Genus'
+level <- 'Genus'
+#level <- F
 year <- '2017 16S'
 det <- 1
 prev<-10/100
 
-#ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
 taxas <- core_members(ps_obj, detection = det, prevalence = prev)
 ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj@sam_data$age <- ps_obj@sam_data$age_at_heath_check_10yr
+ps_obj@sam_data$ISCO <- ps_obj@sam_data$ISCO_group
+ps_obj@sam_data$diet_quality <- ps_obj@sam_data$dietary_quality_score_cat
+ps_obj@sam_data$physical_activity <- ps_obj@sam_data$total_phys_act_index
+#df <- as(ps_obj@sam_data,'data.frame')
+#colnames(df) <- recode(colnames(df),
+#                      `kidney_disease` = "kidney disease",
+#                      `drinking_level` = "drinking level",
+#                      `diet_quality` = "diet quality",
+#                      `physical_activity` = "physical activity",
+#                      `smoking_status` = "smoking status")
+#ps_obj@sam_data <- sample_data(df)
+formula <- ' age + education + cancer + kidney_disease + ISCO  + diet_quality  +  physical_activity + smoking_status + phenotype + batch + sex + drinking_level'
+#+ lipid_mod_agents_med + antidiab_med
 
-formula <- 'phenotype + batch+ sex+age_at_heath_check_10yr + education + 
-                  cancer+kidney_disease+drinking_level+ISCO_group+
-                  lipid_mod_agents_med+antidiab_med+dietary_quality_score_cat + 
-                  liver_diseases+current_smoker+total_phys_act_index'
+
+#formula <- 'phenotype +  sex + age_at_heath_check_10yr + education + cancer+ kidney_disease + drinking_level  + antidiab_med + dietary_quality_score_cat + liver_diseases + current_smoker + bmi_group'
+
+#cols_meta <- data.frame(
+#  category = c('comorbidities','general','general','lifestyle','comorbidities'
+#            ,'comorbidities','lifestyle','drugs','lifestyle',
+#            'comorbidities','lifestyle','comorbidities'), 
+#  row.names = c("phenotype", #"sex",'age_at_heath_check_10yr','education','cancer','kidney_disease','drinking_l#evel',
+#                 'antidiab_med','dietary_quality_score_cat' , 
+#                  'liver_diseases','current_smoker','bmi_group'))
+
 cols_meta <- data.frame(
-  category = c('comorbidities','technical','general','general','lifestyle','comorbidities'
-            ,'comorbidities','lifestyle','drugs','drugs','lifestyle',
-            'comorbidities','lifestyle','lifestyle','lifestyle'), 
-  row.names = c("phenotype", "batch", "sex",'age_at_heath_check_10yr','education','cancer','kidney_disease','drinking_level',
-                  'lipid_mod_agents_med','antidiab_med','dietary_quality_score_cat' , 
-                  'liver_diseases','current_smoker','total_phys_act_index','ISCO_group'))
+  category = c('comorbidities','technical','sociodemographic','sociodemographic','sociodemographic','self-reported\n chronic diseases','self-reported\n chronic diseases','behavioral\n factors','behavioral\n factors',
+            'sociodemographic','sociodemographic','behavioral\n factors'), 
+  row.names = c("phenotype", "batch", "sex",'age','education','cancer','kidney_disease','drinking_level',
+                  'diet_quality' , 
+                  'physical_activity','ISCO','smoking_status'))
 cols_meta$new_name <- rownames(cols_meta)
+category_order <- c('comorbidities','sociodemographic','behavioral\n factors', 'self-reported\n chronic diseases','technical')
+
+# Reorder the factor levels in cols_meta
+cols_meta$category <- factor(cols_meta$category, levels = category_order)
 
 methods <- c('bray','euclidean')
+method <- 'bray'
 # Run the plot_permanova function for both methods
 
 palette <- pnw_palette("Spring", n=length(unique(cols_meta$category)))
+threshold <- 0.006
+list_order <- c('phenotype','age','sex', 'education', 'ISCO', 'physical_activity', 'diet_quality', 'smoking_status', 'drinking_level','cancer','kidney_disease','batch')
 
-plot_list <- map(methods, ~ {
+plot_list <- purrr::map(methods, ~ {
   tryCatch({
     plot_permanova(ps_obj, formula, method = .x, 
                    show_plot = TRUE, level = level, 
                    det = det, prev = prev, 
                    year = year, lab.size = lab.size, 
-                   size = 15, cols_meta= cols_meta,palette=palette)
+                   size = 15, cols_meta= cols_meta,palette=colors,threshold =threshold ,threshold_loc_y = 16)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
@@ -251,10 +315,11 @@ figure
 #png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
 #figure
 #dev.off()
-ggsave("./figures/permanova_asv.png",figure,dpi=300,height = 10,width=12)
+ggsave("./figures/permanova.png",figure,dpi=300,height = 10,width=12)
 ```
 #beta and alpha 
 ```{r,fig.height=10}
+source("./code/beta_alpha.R")
 ps_obj <- ps
 ps_obj <- subset_samples(ps_obj, 
                                !is.na(sample_data(ps_obj)$cancer) &
@@ -266,7 +331,14 @@ level <- 'Genus'
 year <- '2017 16S'
 det <- 1
 prev<-10/100
-
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
 
 trans <- 'compositional'
 distance_method <- 'bray' #euclidean
@@ -278,25 +350,26 @@ ps_obj <- prune_taxa(taxas, ps_obj)
 ps_obj <- microbiome::transform(ps_obj, trans)
 palette <- pnw_palette("Bay",4)
 # Example usage
-beta <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "phenotype", size = 15,palette)
+beta <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "phenotype", size = 15,palette = colors,level_factors= c("MHN","MUN","MHO","MUO"))
 
 measure <- 'Shannon'
 method <- 'wilcox.test'
 
-my_comparisons <- list( c("1st", "2nd"), c("1st", "3rd"), c("1st", "4th"),
-                        c('2nd', '3rd'), c('2nd', '4th'), c('3rd', '4th'))
-alpha <- create_alpha_plots(ps_obj,col = 'phenotype',measure = measure,method = method ,color = palette,my_comparisons= my_comparisons,size=15)
+my_comparisons <- list( c("MHN", "MUN"), c("MHN", "MHO"), c("MHN", "4th"),
+                        c("MUN", "MHO"), c("MUN", "MUO"), c("MHO", "MUO"))
+alpha <- create_alpha_plots(ps_obj,col = 'phenotype',measure = measure,method = method ,color = colors,my_comparisons= my_comparisons,size=15,level_factors= c("MHN","MUN","MHO","MUO"))
 
 size <- c(3,2)
 figure <- ggarrange(beta,alpha,nrow=1, widths = size,labels = c('A', 'B'))
 figure
 figure[[1]]
-
-ggsave("./figures/alpha_beta_asv.png",figure,dpi=300,height = 10,width=15)
+as.factor(ps_obj@sam_data$batch)
+ggsave("./figures/alpha_beta_Genus.png",figure,dpi=300,height = 10,width=15)
 
 ```
 # dmm
 ```{r,fig.width=10}
+source("./code/DMM.R")
 ps_obj <- ps
 ps_obj <- subset_samples(ps_obj, 
                                !is.na(sample_data(ps_obj)$cancer) &
@@ -304,9 +377,17 @@ ps_obj <- subset_samples(ps_obj,
                                !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
                                  !is.na(sample_data(ps_obj)$total_phys_act_index)
                          )
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
 level <- 'Genus'
 det <- 1
-prev<-10/100
+prev<-5/100
 ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
 taxas <- core_members(ps_obj, detection = det, prevalence = prev, include.lowest = F)
 ps_obj <- prune_taxa(taxas, ps_obj)
@@ -314,7 +395,7 @@ tt <- as(tax_table(ps), 'matrix') # need species
 tt <- as.data.frame(tt)
 tt$OTU <- row.names(tt)
 tt$plot <- paste(row.names(tt), tt$Genus,tt$Species, sep = '__')
-palette <- c10
+palette <- colors
 
 dat <- abundances(ps_obj)
 count <- as.matrix(t(dat))
@@ -340,15 +421,18 @@ lap <- ggplot(data=df, aes(x = num))+
   # ggsave(plot=p, path=wd_path, filename='Fit for diffrent Dirichlet Components number.pdf', device='pdf', width = 7, height = 5)
 lap
 column_combinations <- list(
-      c("phenotype", "best")# Define combinations of columns for plotting
+      c( "best","phenotype")# Define combinations of columns for plotting
     )
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,level = c("MHN","MUN","MHO","MUO"))
 #best <- fit[[which.min(unlist(lplc))]]
+#print(best)
 # We want to choose k = 4
 best <- fit[[4]]
 
-plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = palette ,tt=tt,annotation_table = FALSE)
+source("./code/DMM.R")
+plots_dmm <- create_dmm_plot(ps_obj,fit,best,column_combinations= column_combinations,palette = colors ,tt=tt,annotation_table = F)
 print(plots_dmm)
-
+ps@tax_table['ASV12','Species']
 
 ```
 # Biochem disrtibution in dmm's cluster
@@ -386,9 +470,9 @@ for (i in seq_along(cols_to_keep)) {
 ps_meta$log_alanine_transanimase_U.L <- log10(ps_meta$alanine_transanimase_U.L)
 ps_meta$log_hs.CRP_mg.L <- log10(ps_meta$hs.CRP_mg.L)
 ps_meta$log_GGT_U.L <- log10(ps_meta$GGT_U.L)
-#ps_meta$log_triglycerides_mmol.L <- log10(ps_meta$triglycerides_mmol.L)
+ps_meta$log_triglycerides_mmol.L <- log10(ps_meta$triglycerides_mmol.L)
 
-new_element <- c("log_alanine_transanimase_U.L",'log_hs.CRP_mg.L','log_GGT_U.L','triglycerides_mmol.L')
+new_element <- c("log_alanine_transanimase_U.L",'log_hs.CRP_mg.L','log_GGT_U.L','log_triglycerides_mmol.L')
 cols_to_keep <- c(new_element)
 
 my_comparisons <- list(c('1','2'),c('1','3'),c('1','4'),
@@ -417,7 +501,7 @@ for (i in seq_along(cols_to_keep)) {
     geom_violin(trim = FALSE, alpha = 0.1) +
     geom_boxplot(width = 0.5, alpha = 0.75, position = position_dodge(0.9)) +
     geom_jitter(size = 1.5, alpha = 0.5, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9)) +
-    scale_color_manual(values = palette) +
+    scale_color_manual(values = colors) +
     theme_minimal()+
     #theme_bw(base_size = 20) +
     theme(
@@ -454,25 +538,28 @@ create_plot_rel <- function(cols, palette,ps_meta) {
     geom_bar(position = "stack", stat = "identity") +
     geom_text(aes(label = scales::percent(rel_count, accuracy = 1)), position = position_stack(vjust = 0.5), size = 6)  +
     labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]]) +
-    scale_fill_manual(values = palette) +
+    scale_fill_manual(values = colors) +
     theme_linedraw()
 }
 palette <- pnw_palette("Spring", n=5)
-age_dmm <- create_plot_rel(c('best','age_at_heath_check_10yr'),palette,ps_meta)
-sex_dmm <-create_plot_rel(c('best','sex'),palette,ps_meta)
+age_dmm <- create_plot_rel(c('best','age_at_heath_check_10yr'),colors,ps_meta)
+sex_dmm <-create_plot_rel(c('best','sex'),colors,ps_meta)
+batch_dmm <- create_plot_rel(c('best','batch'),colors,ps_meta)
+smoke_dmm <- create_plot_rel(c('best','current_smoker'),colors,ps_meta)
+drink_dmm <- create_plot_rel(c('best','drinking_level'),colors,ps_meta)
+drink_dmm
+#year_dmm <- create_plot_rel(c('best','YEAR'),colors,ps_meta)
 
-batch_dmm <- create_plot_rel(c('best','batch'),palette,ps_meta)
-
-p <- p + ( age_dmm/ sex_dmm/batch_dmm) + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(size=14,face="bold") )
+p <- p + ( age_dmm/ sex_dmm/batch_dmm/drink_dmm) + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(size=14,face="bold") )
 p
-ggsave('./figures/biochem_distribution_dmm_clusters.png',p,dpi=300,width=20,height = 10)
+#ggsave('./figures/biochem_distribution_dmm_clusters.png',p,dpi=300,width=20,height = 15)
 
-
+create_plot_rel(c('phenotype','smoking_status'),colors,ps_meta)
 
 ```
 #biochem_distribution sample group
-```{r,fig.width=18,fig.height=18}
-ps_meta <- as(sample_data(ps_obj), 'data.frame')
+```{r,fig.width=15,fig.height=15}
+ps_meta <- as(sample_data(ps), 'data.frame')
 cols_to_keep<- c("alanine_transanimase_U.L",                                  "apolipoprotein_A1_g.L",                                    
  "apolipoprotein_B_g.L" ,                                    
  "aspartate_transanimase_U.L",                               
@@ -500,16 +587,24 @@ ps_meta$log_alanine_transanimase_U.L <- log10(ps_meta$alanine_transanimase_U.L)
 ps_meta$log_hs.CRP_mg.L <- log10(ps_meta$hs.CRP_mg.L)
 ps_meta$log_GGT_U.L <- log10(ps_meta$GGT_U.L)
 ps_meta$log_cystatin_C_mg.L <- log10(ps_meta$cystatin_C_mg.L)
+ps_meta$log_triglycerides_mmol.L <- log10(ps_meta$triglycerides_mmol.L)
+ps_meta$log_triglycerides_mmol.L
 
 cols_to_keep <- c('log_GGT_U.L','log_hs.CRP_mg.L','triglycerides_mmol.L',
                   'log_alanine_transanimase_U.L','HDL_cholesterol_mmol.L', 
                   'LDL_cholesterol.mmol.L','HbA1c_mol' ,
                   'log_cystatin_C_mg.L','apolipoprotein_A1_g.L', 'apolipoprotein_B_g.L')
 
+cols_to_keep <- c('log_triglycerides_mmol.L',
+                  'HDL_cholesterol_mmol.L', 
+                  'HbA1C_.' ,'log_hs.CRP_mg.L')#,'log_GGT_U.L')
+colnames_biochem <- c('log(TG), mmol/L','HDL-C, mmol/L','HbA1c, %',
+                      'log(CRP), mg/L')#,'log(GGT), U/L')
+
 my_comparisons <- list(c('1st','2nd'),c('1st','3rd'),c('1st','4th'),
                        c('2nd','3rd'),c('2nd','4th'),c('3rd','4th'))
 plot_list <- list()
-
+palette <- pnw_palette("Bay", n=4)
 for (i in seq_along(cols_to_keep)) {
   cols <- c('phenotype', cols_to_keep[i])  # Dynamically create column names
   #cols <- c('phenotype',cols_to_keep[i])
@@ -518,45 +613,161 @@ for (i in seq_along(cols_to_keep)) {
   if (!all(cols %in% colnames(ps_meta))) {
     stop(paste("Columns not found in ps_meta:", paste(cols[!cols %in% colnames(ps_meta)], collapse = ", ")))
   }
-  size <- 20
+  size <- 12
+  
+  anno_df <- ggpubr::compare_means(as.formula(paste(cols[[2]]," ~", cols[[1]])), data = ps_meta, method = "wilcox.test",p.adjust.method = "BH"
+                                   )%>%
+    add_significance("p.adj") %>%
+    add_x_position()%>%
+    add_y_position( data=ps_meta,formula = as.formula(paste(cols[2]," ~", cols[1])),step.increase = 0.2)
 
   # Create the plot
-  plot_list[[cols[2]]] <- ggplot(ps_meta, aes(x = !!sym(cols[1]), y = !!sym(cols[2]), fill = !!sym(cols[1]))) +
+  plot_list[[cols[2]]] <- ggplot(ps_meta, aes_string(x = cols[[1]], y = cols[[2]], color = cols[[1]])) +
     geom_violin(trim = FALSE, alpha = 0.1) +
     geom_boxplot(width = 0.5, alpha = 0.75, position = position_dodge(0.9)) +
     geom_jitter(size = 1.5, alpha = 0.5, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9)) +
     scale_color_manual(values = palette) +
-    stat_compare_means(comparisons = my_comparisons, method = 'wilcox.test', label = "p.signif",hide.ns = TRUE) +
     theme_minimal()+
     #theme_bw(base_size = 20) +
     theme(
       plot.title = element_text(color = "black", size = size,hjust = 0.5, face = "bold"),
       axis.text.y = element_text(color = "black", size = size),
-      axis.text.x = element_text(angle = 90, hjust = 1, size = 15, color = 'black'),
+      axis.text.x = element_text(angle = 0, hjust = 1, size = 15, color = 'black'),
       legend.position = "none",
       axis.title.y = element_text(color = "black", size = size, angle = 90),
       axis.title.x = element_text(color = "black", size = size),
       text = element_text(size = size, colour ='black')
     )+
-    ggtitle(paste0(cols[2]))
+    ggtitle(paste0(colnames_biochem[i]))+
+    stat_pvalue_manual(
+    anno_df,  label = "p.adj.signif", tip.length = 0.02,
+    step.increase = 0.05,coord.flip = FALSE
+  )+
+    scale_x_discrete(labels = c('1st'='MHN','2nd'='MUN','3rd'='MHO','4th'='MUO'))
 }
 
+plot_list[3]
+#+ ggtitle('HbA1c, %')
+p <- ggarrange(plotlist = plot_list,nrow=2,ncol=2)
+p
 
-ggarrange(plotlist = plot_list,nrow=3,ncol=4)
+#ggsave("./figures/figure_1b.png",p,dpi=300,height = 9,width=9)
 
 ```
 #dmm_beta
-```{r, fig.width=17,fig.height=12}
+```{r, fig.width=23,fig.height=12}
 trans <- 'compositional'
-ps_obj <- microbiome::transform(ps_obj, trans)
+ps_obj_comp <- microbiome::transform(ps_obj, trans)
+distance_method <- 'bray' 
 
-beta_dmm <- create_ordination_plots(ps_obj, method = "PCoA", distance_method = distance_method , group = "best", size = 15,palette=pnw_palette("Bay",4))
+beta_dmm <- create_ordination_plots(ps_obj_comp, method = "PCoA", distance_method = distance_method , group = "best", size = 15,palette=colors,level_factors = c('1','2','3','4','5','6'))
 
 
-p <- ggarrange(ggarrange(beta_dmm,labels='A'),plots_dmm,ncol=2)
-p
-ggsave("./figures/dmm_beta.png",p,dpi=300,height = 15,width=25)
+dmm_1 <- ggarrange(ggarrange(beta_dmm,labels='A'),plots_dmm,ncol=2,common.legend = F)
+dmm_1
+ggarrange(beta_dmm,labels='A') | plots_dmm
+print(plots_dmm)
+#ggsave("./figures/dmm_beta.png",p,dpi=300,height = 13,width=23)
 
+```
+#top drivers + phenotype + batch
+
+```{r, fig.width=20,fig.height=20}
+best_list <- list(best) 
+size = 20
+tt <- as(tax_table(ps_obj), 'matrix')
+tt <- as.data.frame(tt)
+table(tt$Family)
+tt$OTU <- row.names(tt)
+tt$plot <- paste(row.names(tt),tt$Genus, sep = '__')#tt$OTU, tt$Family,tt$Species
+pp <- list()
+for (b in best_list){
+  for (k in seq(ncol(fitted(b)))) {
+  d <- melt(fitted(b))
+  colnames(d) <- c("OTU", "cluster", "value")
+
+  d <- subset(d, cluster == k) %>%
+     # Arrange OTUs by assignment strength
+     arrange(value) %>%
+     mutate(OTU = factor(OTU, levels = unique(OTU)))   %>%
+    filter(abs(value) > quantile(abs(value), 0.95
+                                 ))  
+  
+  mm <- merge(tt, d, by = 'OTU')
+  mm <- mm[order(-mm$value),]
+  
+  p <- ggplot(data=mm, aes(x=reorder(plot, value), y=value, fill=Phylum)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  coord_flip() +
+  ggtitle(paste('best Number: ', k)) +
+  scale_fill_manual(values = paletteer_c("ggthemes::Sunset-Sunrise Diverging", 3)) +
+  labs(x='taxa') +
+  theme(
+    axis.title.y = element_text(size = 15, color = "black"),
+    axis.title.x = element_text(size = 15, color = "black"),
+    axis.text = element_text(color = "black", size = 10),
+    plot.title = element_text(size = 20, color = "black"),
+     legend.text = element_text(size = 10),  # Increase legend text size
+    legend.title = element_text(size = 15) 
+  )
+  # print(p)
+  pp[[k]] <- p
+  # ggsave(plot=p, path='./tip', filename=paste("top_drivers: ", k, '.pdf'), device='pdf', width = 10, height = 13)
+}
+# pp <-do.call(grid.arrange,pp)
+grid.arrange(grobs=pp, nrow=3)
+  
+}
+ps_meta$phenotype <- factor(ps_meta$phenotype,level = c('MHN','MUN','MHO','MUO'))
+create_plot_rel <- function(cols, palette,ps_meta) {
+  dataex <- ps_meta %>%
+    dplyr::group_by_at(cols) %>%
+    dplyr::summarise(N = n()) %>%
+    dplyr::mutate(rel_count = N / sum(N)) 
+  
+  # Perform chi-squared test
+  chisq_result <- chisq.test(ps_meta[[cols[1]]], ps_meta[[cols[2]]])
+  chisq_pvalue <- format(chisq_result$p.value, digits = 3)
+  
+  ggplot(dataex, aes(x = !!sym(cols[[1]]), y = rel_count, fill = !!sym(cols[[2]]))) +
+    geom_bar(position = "stack", stat = "identity") +
+    geom_text(aes(label = scales::percent(rel_count, accuracy = 1)), position = position_stack(vjust = 0.5), size = 6)  +
+    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]]) +
+    scale_fill_manual(values = colors) +
+    theme_linedraw()+ 
+    guides(fill=guide_legend(title='Enterotype'))+
+    # Adjust font size of x-axis labels
+    theme(axis.text.x = element_text(size = 10),
+          axis.text.y = element_text(size=10),
+          legend.box.margin = margin(l = 0, unit = "cm"))
+}
+#palette <- pnw_palette("Spring", n=5)
+phenotype_dmm <- create_plot_rel(c('phenotype','best'),colors,ps_meta)
+phenotype_dmm 
+batch_dmm <- create_plot_rel(c('batch','best'),colors,ps_meta)
+batch_dmm
+
+p_top_taxa <- ((pp[[1]] + pp[[2]]) /      # First row with plots from pp
+               (pp[[3]] + pp [[4]]))# /
+                  #(pp[[5]] + pp[[6]]))# Second row with more plots from pp
+               
+entero <- (phenotype_dmm / batch_dmm)           # Stack age_dmm over batch_dmm
+
+
+#final_plot <- (ggarrange(beta_dmm,labels='A') | ggarrange(plots_dmm,labels = 'B') ) /
+#                ggarrange(p_top_taxa,entero,widths = c(1,1),labels =c("C","D")) 
+final_plot <-
+ggarrange(beta_dmm,p_top_taxa,ncol=1,nrow=2)|(plots_dmm/entero) 
+#final_plot <- (ggarrange(beta_dmm,labels='A') | ggarrange(plots_dmm,labels = 'B') ) /
+#                ggarrange((phenotype_dmm | batch_dmm),widths = c(1,1),labels =c("C","D")) +plot_layout(heights = c(2,1))
+# Отображаем финальный график
+
+plot(final_plot)    
+# pp
+ggsave("./figures/dmm_beta.png",final_plot,dpi=300,height = 16
+       ,width=24)
+# heatmapdmn
 ```
 
 #Create a list of subsets to network
@@ -571,23 +782,32 @@ ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
 taxas <- core_members(ps_obj, detection = det, prevalence = prev, include.lowest = F)
 ps_obj <- prune_taxa(taxas, ps_obj)
 
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+
 # Manually create the subsets
-ps_obj_1st <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "1st")
+ps_obj_1st <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "MHN")
 count_mtrx_1st <- prepare_count_table(ps_obj_1st, taxa_name_func)
 taxa_names(ps_obj_1st) <- colnames(count_mtrx_1st)
 otu_table(ps_obj_1st) <- otu_table(count_mtrx_1st, taxa_are_rows = FALSE)
 
-ps_obj_2nd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "2nd")
+ps_obj_2nd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "MUN")
 count_mtrx_2nd <- prepare_count_table(ps_obj_2nd, taxa_name_func)
 taxa_names(ps_obj_2nd) <- colnames(count_mtrx_2nd)
 otu_table(ps_obj_2nd) <- otu_table(count_mtrx_2nd, taxa_are_rows = FALSE)
 
-ps_obj_3rd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "3rd")
+ps_obj_3rd <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "MHO")
 count_mtrx_3rd <- prepare_count_table(ps_obj_3rd, taxa_name_func)
 taxa_names(ps_obj_3rd) <- colnames(count_mtrx_3rd)
 otu_table(ps_obj_3rd) <- otu_table(count_mtrx_3rd, taxa_are_rows = FALSE)
 
-ps_obj_4th <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "4th")
+ps_obj_4th <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$phenotype == "MUO")
 count_mtrx_4th <- prepare_count_table(ps_obj_4th, taxa_name_func)
 taxa_names(ps_obj_4th) <- colnames(count_mtrx_4th)
 otu_table(ps_obj_4th) <- otu_table(count_mtrx_4th, taxa_are_rows = FALSE)
@@ -596,8 +816,20 @@ count_mtrx <- prepare_count_table(ps_obj, taxa_name_func)
 taxa_names(ps_obj) <- colnames(count_mtrx)
 otu_table(ps_obj) <- otu_table(count_mtrx, taxa_are_rows = FALSE)
 
+#ps_obj_healthy <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$bmi_group #== "Healthy")
+#count_mtrx_healthy <- prepare_count_table(ps_obj_healthy, taxa_name_func)
+#taxa_names(ps_obj_healthy) <- colnames(count_mtrx_healthy)
+#otu_table(ps_obj_healthy) <- otu_table(count_mtrx_healthy, taxa_are_rows = FALSE)
+#
+#ps_obj_obesity <- phyloseq::subset_samples(ps_obj, sample_data(ps_obj)$bmi_group #== "Obesity")
+#count_mtrx_obesity <- prepare_count_table(ps_obj_obesity, taxa_name_func)
+#taxa_names(ps_obj_obesity) <- colnames(count_mtrx_obesity)
+#otu_table(ps_obj_obesity) <- otu_table(count_mtrx_obesity, taxa_are_rows = FALSE)
+#
+#phenotype_subsets <- list("Healthy" = ps_obj_healthy, "Obesity" = ps_obj_obesity #)
+#
 # Create a list of the subsets
-phenotype_subsets <- list("1st" = ps_obj_1st, "2nd" = ps_obj_2nd, "3rd" = ps_obj_3rd, "4th" = ps_obj_4th)
+phenotype_subsets <- list("MHN" = ps_obj_1st, "MUN" = ps_obj_2nd, "MHO" = ps_obj_3rd, "MUO" = ps_obj_4th)
 ```
 
 # Define a function to construct and analyze network
@@ -609,7 +841,7 @@ construct_analyze_networks <- function(ps_obj) {
                                 measure = "spieceasi",
                                 measurePar = list(nlambda = 25, 
                                                   method = "mb",
-                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 100),
+                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 30),
                                                   lambda.min.ratio = 1e-3),
                                 normMethod = "none", 
                                 zeroMethod = "none",
@@ -638,6 +870,7 @@ construct_analyze_networks <- function(ps_obj) {
 network_analysis_results <- construct_analyze_networks(ps_obj)
 
 ```
+
 ```{r, fig.width=70, fig.height=30}
 # Define the visualization function
 visualize_network_analysis <- function(props_season1) {
@@ -646,6 +879,7 @@ visualize_network_analysis <- function(props_season1) {
     
   # Optionally, you can also save the plots
   pdf_filename <- paste0("./figures/network_plot.pdf")
+  #pdf_filename <- paste0("~/DAVID_WGS/different_figures/network_plot.pdf")
   pdf(pdf_filename, width = 100, height = 50) 
   plot(props_season1, 
          sameLayout = TRUE, 
@@ -705,10 +939,12 @@ construct_analyze_networks <- function(phenotype_subsets) {
     # Construct the network using NetCoMi
     net_spring2 <- netConstruct(data = ps_obj_1,
                                 data2 = ps_obj_2,
+                                filtTax = "highestFreq",
+                                filtTaxPar = list(highestFreq = 250),
                                 measure = "spieceasi",
                                 measurePar = list(nlambda = 25, 
                                                   method = "mb",
-                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 100),
+                                                  pulsar.params = list(rep.num = 100, subsample.ratio = 0.8, thresh = 0.025, ncores = 30),
                                                   lambda.min.ratio = 1e-3),
                                 normMethod = "none", 
                                 zeroMethod = "none",
@@ -749,25 +985,24 @@ visualize_network_analysis <- function(network_analysis_results, cex_value = 1.5
   
   for (combination_name in names(network_analysis_results)) {
     props_season1 <- network_analysis_results[[combination_name]]
-    
+
     # Save the summary of props_season1 in the list
     summary_props <- summary(props_season1)
-    
+
     # Replace 'group 1' and 'group 2' in the summaries with actual names from combination
     group_names <- strsplit(combination_name, "_vs_")[[1]]  # Extract group names from combination
-    
-    if (!is.null(summary_props[["glob_probs"]])) {
-      colnames(summary_props[["glob_probs"]]) <- group_names  # Replace column names for glob_probs_lcc
-    }
-    
+
+    #if (!is.null(summary_props[["glob_probs"]])) {
+    #  colnames(summary_props[["glob_probs"]]) <- group_names  # Replace column names for glob_probs_lcc
+    #}
+
     # Save the modified summary back to the summaries_list
     summaries_list[[combination_name]] <- summary_props
-    
-    pdf(pdf_filename, width = 100, height = 50) 
+    #pdf(pdf_filename, width = 100, height = 50) 
     # Optionally, you can also save the plots
     pdf_filename <- paste0("./figures/network_plot__paper_", combination_name, ".pdf")
-    
-    #png(pdf_filename, width = 100, height = 50, units="in", res=150) 
+    pdf(pdf_filename, width = 100, height = 50) 
+    #pdf(pdf_filename, width = 100, height = 50, units="in", res=300) 
     
     
     plot(props_season1, 
@@ -780,9 +1015,9 @@ visualize_network_analysis <- function(network_analysis_results, cex_value = 1.5
      rmSingles = "inboth", 
      nodeSize = "eigenvector", 
      labelScale = FALSE,
-     cexNodes = 1.5, 
-     cexLabels = 3,
-     cexHubLabels = 6,
+     cexNodes = 1, 
+     cexLabels = 2.5,
+     cexHubLabels = 5,
      cexTitle = 9,
      groupNames = group_names)
 
@@ -844,11 +1079,11 @@ if (!is.null(summary_props[["glob_probs"]])) {
     dev.off()
     
     # Check if the file has been created
-    if (file.exists(pdf_filename)) {
-      message(paste("Successfully saved plot:", pdf_filename))
-    } else {
-      warning(paste("Failed to save plot:", pdf_filename))
-    }
+    #if (file.exists(pdf_filename)) {
+    #  message(paste("Successfully saved plot:", pdf_filename))
+    #} else {
+    #  warning(paste("Failed to save plot:", pdf_filename))
+    #}
   }
   
   # Return the list of summaries after the loop finishes
@@ -861,11 +1096,71 @@ summaries <- visualize_network_analysis(network_analysis_results, cex_value = 4.
 # Print summaries (or part of them for a large output)
 print(summaries)
 
+names(network_analysis_results)
 
 
 ```
+#Supp
+```{r,fig.width=15,fig.height=10}
+ps_obj <- ps
+ps_obj@sam_data$bmi_group
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)                         )
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+#level <- 'Genus'
+year <- '2017 16S'
+det <- 1
+prev<-10/100
 
-```{r}
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels =  c("MHN","MUN","MHO","MUO"))
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj@sam_data$age <- ps_obj@sam_data$age_at_heath_check_10yr
+ps_obj@sam_data$ISCO <- ps_obj@sam_data$ISCO_group
+ps_obj@sam_data$diet_quality <- ps_obj@sam_data$dietary_quality_score_cat
+ps_obj@sam_data$physical_activity <- ps_obj@sam_data$total_phys_act_index
+
+ps_meta <- as(sample_data(ps_obj), 'data.frame')
+
+cols_meta <- data.frame(
+  category = c('technical','sociodemographic','sociodemographic','sociodemographic','self-reported\n chronic diseases','self-reported\n chronic diseases','behavioral\n factors','behavioral\n factors',
+            'self-reported\n chronic diseases','sociodemographic','sociodemographic','behavioral\n factors'), 
+  row.names = c( "batch", "sex",'age','education','cancer','kidney_disease','drinking_level',
+                  'diet_quality' , 
+                  'diabetes','physical_activity','ISCO','smoking_status'))
+#cols_meta$new_name <- rownames(cols_meta)
+category_order <- c('sociodemographic','behavioral\n factors', 'self-reported\n chronic diseases','technical')
+
+# Reorder the factor levels in cols_meta
+cols_meta$category <- factor(cols_meta$category, levels = category_order)
+
+sorted_cols_meta <- cols_meta %>%
+  arrange(category)
+
+colors_category <- c(
+  'sociodemographic' = '#a100bf',
+  'self-reported\n chronic diseases' ='#bf4380',
+  'technical'='#1d8dcf',
+  'behavioral\n factors' = '#f7b126'
+)
+
+# Convert the named vector to a data frame
+colors_df <- data.frame(
+  category = names(colors_category),  # Extract names as a column
+  color = colors_category,             # Use the values as another column
+  stringsAsFactors = FALSE             # Prevent automatic conversion to factors
+)
 create_plot_rel <- function(cols, palette,ps_meta) {
   dataex <- ps_meta %>%
     dplyr::group_by_at(cols) %>%
@@ -876,17 +1171,163 @@ create_plot_rel <- function(cols, palette,ps_meta) {
   chisq_result <- chisq.test(ps_meta[[cols[1]]], ps_meta[[cols[2]]])
   chisq_pvalue <- format(chisq_result$p.value, digits = 3)
   
-  ggplot(dataex, aes(x = !!sym(cols[[1]]), y = rel_count, fill = !!sym(cols[[2]]))) +
+  dataex[[cols[2]]] <- str_wrap(dataex[[cols[2]]], width = 10)
+  cols[2] <- str_wrap(cols[2],width = 10)
+  #print(dataex)
+  dataex$category <- factor(cols_meta[cols[2],'category'])
+ ggplot(dataex, aes(x = !!sym(cols[[1]]), y = rel_count, fill = !!sym(cols[[2]]))) +
     geom_bar(position = "stack", stat = "identity") +
-    geom_text(aes(label = scales::percent(rel_count, accuracy = 1)), position = position_stack(vjust = 0.5), size = 6)  +
-    labs(title = paste("Chi-squared p-value:", chisq_pvalue ), fill = cols[[2]],tag = 'B') +
+    geom_text(aes(label = scales::percent(rel_count, accuracy = 1)), position = position_stack(vjust = 0.5), size = 3)  +
+    labs(title = paste("Chi-squared p-value:\n", chisq_pvalue ), fill = cols[[2]]) +
     scale_fill_manual(values = palette) +
     theme_linedraw()+
-    theme(axis.text.x = element_text(hjust = 1),plot.tag=element_text(size=14,face="bold"),
-          legend.text =  element_text(size = 14, family = "Fira Sans"),
-          legend.title = element_text(size = 14,family = "Fira Sans",face = "bold"))
+    theme(axis.text.x = element_text(hjust = 1),
+          legend.text =  element_text(size = 8, family = "Fira Sans"),
+          legend.key.size = unit(0.5, "cm"),
+          legend.title = element_text(size = 8,family = "Fira Sans",face = "bold"),
+          plot.margin = margin(t = 0,  # Top margin
+                             r = 1,  # Right margin
+                             b = 0,  # Bottom margin
+                             l = 0,  # Left margin
+                             unit = "cm"))+
+   facet_grid(category ~ ., scales = "free", space = "free")
 }
 
-create_plot_rel(cols = c('phenotype','best'),palette = palette,ps_meta=ps_meta)
+
+features = rownames(sorted_cols_meta)
+
+
+plot_list <- purrr::map(features, ~ {
+  tryCatch({
+    create_plot_rel(cols = c('phenotype',.x), palette = colors,ps_meta=ps_meta)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+for (i in seq_along(plot_list)) {
+  plot_list[[i]] <- plot_list[[i]] + theme(strip.background.y = element_rect(fill = unique(colors_df[as.character(unique(plot_list[[i]]$data$category)),'color'])),
+                                           strip.text = element_text(size = 10,color='black'))
+}
+
+# Check results
+#print(plot_list)
+plot_list[[1]]
+
+combined_plot <- ggarrange(plotlist = plot_list, ncol = 4, nrow = 3)
+combined_plot
+ggsave("./figures/phenotype_features.png",combined_plot,dpi=300,height = 10,width=20)
+
 ```
+#Get gtdb annotation
+```{r}
+library(dada2)
+taxa <- assignTaxonomy(ps_obj@refseq, "/mnt/disk1/DATABASES/GTDB_bac120_arc122_ssu_r202_fullTaxo.fa.gz", multithread=10)
+taxa
+ps_obj@refseq[23]
+ps_obj@tax_table[23]
+
+rownames(taxa)[23]
+taxa[23,]
+ps@sam_data$HbA1
+as.character(ps@refseq$ASV53)
+write.csv(ps@sam_data,'meta_16s.csv')
+```
+
+
+```{r}
+read.R
+ps_da <- readRDS('deseq2_res_table.rds')
+new_meta <- read.csv('~/16s_Arkhangelsk_paper/updated_meta_16s.csv',row.names=1)
+new_meta$new_id
+old_names <- rownames(sample_data(ps))
+new_names <- new_meta$new_id[match(old_names, rownames(new_meta))]
+otu_table(ps)
+```
+
+```{r}
+library(readr)
+# 1. Чтение данных
+data <- read.csv("~/attributes (4).tsv", header = TRUE,sep='\t')
+
+
+name_list <- c('KYH106745','KYH128797','KYH129913','KYH145956','KYH148246','KYH150630','KYH152684','KYH157702','KYH165653',
+               'KYH169316','KYH170545','KYH189064','KYH205934','KYH222697','KYH235429','KYH242378','KYH262952','KYH273737',
+               'KYH292373','KYH318934','KYH321706','KYH325469','KYH346232','KYH382659','KYH384070','KYH385410','KYH394012',
+               'KYH429822','KYH444549','KYH444685','KYH450360','KYH457149','KYH477425','KYH491256','KYH501218','KYH534580',
+               'KYH535879','KYH538373','KYH548895','KYH552241','KYH554951','KYH555588','KYH564945','KYH575691','KYH577480',
+               'KYH581545','KYH584261','KYH603364','KYH606764','KYH609626','KYH623139','KYH623361','KYH626224','KYH670613',
+               'KYH699696','KYH701560','KYH791336','KYH793447','KYH797054','KYH810920','KYH835108','KYH852816','KYH857633',
+               'KYH865564','KYH871768','KYH878246','KYH892801','KYH919200','KYH927148','KYH930282','KYH934727','KYH936965',
+               'KYH946248','KYH951729','KYH970122','KYH974592','KYH978537','KYH986107','KYH990160','KYH991090','KYH991676',
+               'KYH992172')
+data$sample_name
+
+filtered_data <- data[match(name_list, data$sample_name), ]
+filtered_data <- filtered_data[!is.na(filtered_data$sample_name), ]
+
+# или с использованием dplyr
+library(dplyr)
+filtered_data_dplyr <- data %>%
+  filter(sample_name %in% name_list) %>%
+  slice(match(name_list, sample_name))
+
+# Вывод результата
+print(filtered_data)
+print(filtered_data_dplyr)
+write_tsv(filtered_data, path = "~/filtered_data.tsv")
+
+```
+#correalation between data
+```{r}
+df <- read.csv('~/DAVID_WGS/17_num_cols_df.csv')
+df$urine_albumin_mg.L
+df_corr <- df %>% select(age,serum_creatinine_micromol.L,cystatin_C_mg.L,urine_creatinine_micromol.L,urine_albumin_mg.L)
+df_corr <- df_corr %>%
+  filter((cystatin_C_mg.L < 6) & (urine_albumin_mg.L <50) )
+library(corrplot)
+res <- cor(df_corr, method = "pearson", use = "complete.obs")
+testRes = cor.mtest(df_corr, conf.level = 0.95)
+corrplot(res, method = 'number',p.mat = testRes$p)
+
+model <- lm(age ~ urine_albumin_mg.L, data = df_corr)
+coef <- summary(model)$coefficients[2, ]
+    
+# Сохраняем результаты
+results <- data.frame(
+  coefficient = coef["Estimate"],
+  p_value = coef["Pr(>|t|)"],
+  stringsAsFactors = FALSE
+)
+all_results <- bind_rows(results) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"))    
+ggplot(df_corr, aes(x = age, y = urine_albumin_mg.L)) +
+      geom_point(alpha = 0.6, color = "#3674B5", size = 2) +
+      geom_smooth(method = "lm", color = "#DE3163", se = TRUE, fill = "#F7B7B7") +  
+  labs(
+    x = "age",
+    y = paste0("urine_albumin_mg.L")
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 11, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 10),
+    panel.border = element_rect(color = "grey", fill = NA),
+    plot.margin = unit(c(1,1,1,1), "cm"))+
+      annotate(
+        "text",
+        x = Inf, y = Inf,
+        hjust = 1.1, vjust = 1.1,
+        label = sprintf("β = %.2f\np = %.3f\np.adj = %.3f",
+                      all_results$coefficient,
+                      all_results$p_value,
+                      all_results$p_adj),
+        size = 3
+      )
+```
+
+
+
 

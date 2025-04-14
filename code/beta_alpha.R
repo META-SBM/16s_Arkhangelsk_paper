@@ -10,12 +10,16 @@ library(gridExtra)
 library(lemon)
 library(ggsignif)
 library(rstatix)
+library(vegan)
+library(ggrepel)
 
 # Define the function to create the ordination plots
-create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "wunifrac", group, size = 10,palette) {
+create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "wunifrac", group, size = 10,palette,level_factors,taxa_plot = TRUE) {
   
+  #ps_obj <- ps_obj_transform
   # Calculate distance matrix
   dist <- phyloseq::distance(ps_obj, method = distance_method)
+  #dist <- vegdist(ps_obj, method = distance_method)
   
   # Perform ordination
   ordination <- ordinate(ps_obj, method = method, distance = dist)
@@ -37,8 +41,39 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
   # Merge means back into the original data
   P <- P %>%
     dplyr::left_join(means, by = group)
+  P[,group] <- factor(P[,group],level = level_factors)
   anosim_res <- anosim(dist, P[[group]],parallel = 30)
   anosim_text <- paste("ANOSIM R:", round(anosim_res$statistic, 3), "p-value:", round(anosim_res$signif, 3))
+  
+  if(taxa_plot != 'none'){
+    ps_ph <- speedyseq::tax_glom(ps_obj,taxrank = 'Genus', NArm=T )
+    env_data <- as.data.frame(otu_table(ps_ph))  # Replace with your environmental data
+    # Fit environmental vectors using envfit
+    env_fit <- envfit(as.data.frame(ordination$vectors), env_data, permutations = 999, na.rm = TRUE)
+    # Extract significant vectors (e.g., p-value < 0.05)
+    significant_vectors <- as.data.frame(env_fit$vectors$arrows)
+    
+    # Add p-values to the data frame
+    significant_vectors$pvals <- env_fit$vectors$pvals
+    # Add correlation coefficients (r values) to the data frame
+    significant_vectors$r <- env_fit$vectors$r
+    
+    # Filter for significant vectors (p-value < 0.05)
+    significant_vectors <- significant_vectors %>%
+      filter(pvals < 0.05)
+    
+    # Select top 10 vectors with the largest r values
+    top_significant_vectors <- significant_vectors %>%
+      arrange(desc(r)) %>%
+      head(20)
+    
+    tax_df <- as.data.frame(tax_table(ps_obj))
+    tax_df <- tax_df[,c('Phylum','Genus'),drop = F]
+    top_significant_vectors <- merge(top_significant_vectors,tax_df,by = 0,all.x=T)
+    rownames(top_significant_vectors) <- top_significant_vectors$Row.names
+    top_significant_vectors$taxa <- paste0(top_significant_vectors$Phylum,'_',top_significant_vectors$Genus)
+  }
+  
   
   # Create scatter plot with ellipses and means
   pl <-  ggplot(P, aes_string(x = "Axis.1", y = "Axis.2", color = group)) +
@@ -62,6 +97,27 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
       panel.grid.major = element_line(size = 0.1, linetype = 'solid', color = "gray"),
       panel.grid.minor = element_line(size = 0.1, linetype = 'solid', color = "gray")
     )
+  #pl
+  if(taxa_plot != 'none'){
+    pl <-pl + geom_segment(data = top_significant_vectors, 
+                    aes(x = 0, y = 0, 
+                        xend = Axis.1 * 10, 
+                        yend = Axis.2 * 10),  # Scale vectors for better visualization
+                    arrow = arrow(length = unit(0.2, "cm")), 
+                    color = "black", alpha = 0.5) +
+      geom_text_repel(data = top_significant_vectors, 
+                      aes(x = Axis.1 * 10, 
+                          y = Axis.2 * 10, 
+                          label = taxa),  # Add taxonomic labels
+                      color = "black",
+                      alpha = 0.9,
+                      size = 4, 
+                      vjust = 0.5, 
+                      hjust = 1,
+                      box.padding = 0.5,   # Optional: Adjust padding around text
+                      point.padding = 0.5,
+                      max.overlaps = Inf)
+  }
   # Perform Wilcoxon test for Axis.1
   # Perform pairwise comparisons for Axis.1
   # Define pairwise comparisons
@@ -71,6 +127,19 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
     add_significance("p.adj") %>%
     add_x_position()%>%
     add_y_position( data=P,formula = as.formula(paste("Axis.1 ~", group)),step.increase = 0.2)
+  
+  for (i in 1:nrow(anno_df)) {
+    # Проверяем group1
+    if (anno_df$group1[i] %in% level_factors) {
+      anno_df$xmin[i] <- which(level_factors == anno_df$group1[i]) # Получаем порядковый номер для xmin
+    }
+    
+    # Проверяем group2
+    if (anno_df$group2[i] %in% level_factors) {
+      anno_df$xmax[i] <- which(level_factors == anno_df$group2[i]) # Получаем порядковый номер для xmax
+    }
+  }
+  
   # Create violin plot for Axis.1
   x_dens <- ggplot(P, aes_string(x = group, y = "Axis.1",color=group)) +
     geom_violin(trim = FALSE, alpha = 0.1) +
@@ -100,6 +169,18 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
     add_significance("p.adj") %>%
     add_x_position()%>%
     add_y_position( data=P,formula = as.formula(paste("Axis.2 ~", group)),step.increase = 0.2)
+  
+  for (i in 1:nrow(anno_df)) {
+    # Проверяем group1
+    if (anno_df$group1[i] %in% level_factors) {
+      anno_df$xmin[i] <- which(level_factors == anno_df$group1[i]) # Получаем порядковый номер для xmin
+    }
+    
+    # Проверяем group2
+    if (anno_df$group2[i] %in% level_factors) {
+      anno_df$xmax[i] <- which(level_factors == anno_df$group2[i]) # Получаем порядковый номер для xmax
+    }
+  } 
   # Create violin plot for Axis.2
   y_dens <- ggplot(P, aes_string(x = group, y = "Axis.2", color = group)) +
     geom_violin(trim = FALSE, alpha = 0.1) +
@@ -162,7 +243,7 @@ create_ordination_plots <- function(ps_obj, method = "PCoA", distance_method = "
   gB$heights[4:5] <- yHeight
   gD$heights[3:5] <- yHeight
   
-  p =grid.arrange( gD,gB,gL ,gA,ncol=2, nrow=2, widths=c(2, 5), heights=c(5, 2))
+  p =grid.arrange(gD,gB,gL ,gA,ncol=2, nrow=2, widths=c(2, 5), heights=c(5, 2))
   
 }
 
@@ -177,7 +258,7 @@ plot_alpha_div <- function(
   
   return(p)
 }
-create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',color,my_comparisons,size=10){
+create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.test',color,my_comparisons,size=10,level_factors){
   
   p <- plot_alpha_div(ps_obj, group = col, color = col, measure = measure) +
   geom_violin(trim=F, alpha=0.1) +
@@ -201,6 +282,18 @@ create_alpha_plots <- function(ps_obj,col,measure = 'Shannon',method = 'wilcox.t
     add_significance("p.adj") %>%
     add_x_position()%>%
     add_y_position( data=df,formula = as.formula(paste("value ~", group)),step.increase = 0.2)
+  
+  for (i in 1:nrow(anno_df)) {
+    # Проверяем group1
+    if (anno_df$group1[i] %in% level_factors) {
+      anno_df$xmin[i] <- which(level_factors == anno_df$group1[i]) # Получаем порядковый номер для xmin
+    }
+    
+    # Проверяем group2
+    if (anno_df$group2[i] %in% level_factors) {
+      anno_df$xmax[i] <- which(level_factors == anno_df$group2[i]) # Получаем порядковый номер для xmax
+    }
+  }
   
   p <- p +
     stat_pvalue_manual(
