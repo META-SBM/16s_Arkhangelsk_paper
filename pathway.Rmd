@@ -1,0 +1,389 @@
+#load library
+```{r}
+library(octobiom)
+library(dplyr)
+library(microbiome)
+library(phyloseq)
+library(vegan)
+library(stringr)
+library(ggpubr)
+library(patchwork)
+```
+#load data
+```{r}
+ps <- readRDS('./DATA/ps_16s_pathway.rds')
+
+meta <- as(ps@sam_data,'data.frame')
+unique_ids <- meta %>%
+  distinct(ID_KYH, .keep_all = TRUE)
+otu <- ps@otu_table
+tax <- ps@tax_table
+ps <- phyloseq(otu,tax, sample_data(unique_ids))
+ps
+
+colors <- c('#34b9ed','#a100bf',
+'#f7b126','#bf4380','#1d8dcf',
+'#024cc1',
+'#f0e74c','#b2d1e3',
+'#cc7daa',
+
+'#ff594c'
+)
+```
+#permanova
+```{r,fig.width=14}
+source("./code/permanova.R")
+?octobiom::prepare_phyloseq
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,agglomeration_flag = F,first = 'filter',flag_unclassified = F)
+
+ps_obj <- subset_samples(ps_obj, 
+                               !is.na(sample_data(ps_obj)$cancer) &
+                               !is.na(sample_data(ps_obj)$liver_diseases) &
+                               !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
+                                 !is.na(sample_data(ps_obj)$total_phys_act_index)                         )
+
+ps_obj@sam_data$age <- ps_obj@sam_data$age_at_heath_check_10yr
+ps_obj@sam_data$ISCO <- ps_obj@sam_data$ISCO_group
+ps_obj@sam_data$diet_quality <- ps_obj@sam_data$dietary_quality_score_cat
+ps_obj@sam_data$physical_activity <- ps_obj@sam_data$total_phys_act_index
+
+
+formula <- ' age + education + cancer + kidney_disease + ISCO  + diet_quality  +  physical_activity + smoking_status + phenotype + batch + sex + drinking_level'
+
+cols_meta <- data.frame(
+  category = c('comorbidities','technical','sociodemographic','sociodemographic','sociodemographic','self-reported\n chronic diseases','self-reported\n chronic diseases','behavioral\n factors','behavioral\n factors',
+            'sociodemographic','sociodemographic','behavioral\n factors'), 
+  row.names = c("phenotype", "batch", "sex",'age','education','cancer','kidney_disease','drinking_level',
+                  'diet_quality' , 
+                  'physical_activity','ISCO','smoking_status'))
+cols_meta$new_name <- rownames(cols_meta)
+category_order <- c('comorbidities','sociodemographic','behavioral\n factors', 'self-reported\n chronic diseases','technical')
+
+
+
+# Reorder the factor levels in cols_meta
+cols_meta$category <- factor(cols_meta$category, levels = category_order)
+
+methods <- c('bray','euclidean')
+
+# Run the plot_permanova function for both methods
+
+color_palette <- colors
+threshold <- 0.0055
+
+plot_list <- purrr::map(methods, ~ {
+  tryCatch({
+    plot_permanova(ps_obj, formula, method = .x, 
+                   show_plot = TRUE, level = level, 
+                   det = det, prev = prev, 
+                   year = year, lab.size = lab.size, 
+                   size = 10, cols_meta= cols_meta,palette=color_palette,threshold =threshold ,threshold_loc_y = 16)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+# Check results
+print(plot_list)
+
+figure <- ggarrange(plotlist = list(plot_list[[1]][[2]],plot_list[[2]][[2]]),nrow =2,ncol = ceiling(length(plot_list)/2),labels = c('A', 'B'))
+figure
+
+#png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
+#figure
+#dev.off()
+plot_list[[1]][[2]]
+ggsave("./figures/permanova_pathway.png",figure,dpi=300,height = 10,width=12)
+```
+
+#Hir clustering
+```{r,fig.height=10}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,agglomeration_flag = F,first = 'filter',flag_unclassified = F)
+?octobiom::barplot_hierarchical
+ps_obj
+ps_obj <-subset_samples(ps_obj,ps_obj@sam_data$df_sample != '1198847_B3')
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+#Creates a stacked barplot of taxonomic compositions with hierarchical clustering dendrogram and sample metadata annotations for top taxa.
+phenotype_colors <- c(
+  'MHN' = '#a7c957',
+  'MUN' = '#b80c09',
+  "MHO" = '#0b4f6c',
+  "MUO" = "#D5B3FF"
+)
+age_colors <- c(
+  '35-44'='#48cae4',#blue
+  '45-54' = '#a24f7c' ,
+  '55-64'='#ff6b35',#orange
+  '65+' = '#ef233c' #red
+)
+sex_colors <- c(
+    'female'='#ff5c8a',
+    'male' = '#0466c8'
+  )
+batch_colors <- c(
+  'B1' = '#a7c957',
+  'B3' = '#b80c09',
+  "B4" = '#0b4f6c',
+  "B6" = "#D5B3FF"
+)
+features <- c('phenotype','batch','sex',"age_at_heath_check_10yr" )
+#color_palette <- octobiom::get_palette("set_20_2")
+color_palette <- c('white',octobiom::get_palette("set_20_2"),octobiom::get_palette("set_20_1"))
+
+colors_annotation <- list('batch' = batch_colors,'phenotype' = phenotype_colors,
+                                                                     'age_at_heath_check_10yr' = age_colors,'sex' = sex_colors)
+barplot_results <- octobiom::barplot_hierarchical(ps_obj,taxrank="pathway", top = 30, feature = features,
+                                      dist = 'bray',colors_barplot = color_palette,
+                                   colors_annotation = colors_annotation,decreasing = T,
+                                   size = c(0.5,0.2,0.2,0.2,0.2,5), colnames = F)
+
+barplot_results$combined_plot
+ggsave('./figures/barplot_hierarchical_pathway.png',barplot_results$combined_plot,dpi = 300,width = 16,height = 12,limitsize = FALSE)
+```
+#Beta
+```{r,fig.height=8,fig.width=8}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10, prevalence = 0.05,agglomeration_flag = F,first = 'filter',flag_unclassified = F)
+ps_obj <-subset_samples(ps_obj,ps_obj@sam_data$df_sample != '1198847_B3')
+ps_obj
+?octobiom::create_ordination_plots
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = dplyr::recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels = c('MHN','MUN','MHO','MUO'))
+ps_obj@sam_data$batch <- factor(ps_obj@sam_data$batch,levels = c('B1','B3','B4','B6'))
+
+
+
+#Let's analyze beta diversity
+features <- c('phenotype','batch','age_at_heath_check_10yr','sex')
+?octobiom::create_ordination_plots
+group <- c('phenotype','batch')
+
+color_palette <- c(octobiom::get_palette("set_2_1"),octobiom::get_palette("set_2_3"))
+
+plot_beta_list <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_ordination_plots(ps_obj, group= .x, 
+                                      distance_method = "bray",palette = color_palette,taxa_plot = FALSE)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+plot(plot_beta_list[[1]])
+plot(plot_beta_list[[2]])
+plot(plot_beta_list[[3]])
+plot(plot_beta_list[[4]])
+
+
+?octobiom::create_ordination_plots_double
+
+ggsave('./figures/beta_phenotypes_pathway.png',plot_beta_list[[1]],dpi=300,width=11,height=10)
+final_pathway <- ggarrange(barplot_results$combined_plot,plot_beta_list[[1]],labels = c('A','B'),widths = c(2,1))
+
+ggsave('./figures/final_pathway_hier_beta.png',final_pathway,dpi=300,width=25,height=11)
+#plot(beta_double)
+```
+#diff_analysis_maaslin
+```{r}
+?octobiom::prepare_phyloseq
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = "KO",first = 'filter',flag_unclassified = F)
+taxa_names(ps_obj) <- ps_obj@tax_table[,'KO']
+
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = dplyr::recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels = c("MHN","MUN","MHO","MUO"))
+
+
+library(Maaslin2)
+?octobiom::process_maaslin
+
+# Define methods
+methods <- list(
+  list(analysis_method = "CPLM", normalization = "TSS", transform = "NONE"),
+  list(analysis_method = "LM", normalization = "TSS", transform = "LOG"),
+  list(analysis_method = "LM", normalization = "CLR", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "CSS", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "TMM", transform = "NONE")
+)
+?process_maaslin
+results <- process_maaslin(
+  ps_obj = ps_obj,
+  comparison_group = "phenotype",
+  methods = methods,
+  fixed_effects = c("phenotype",'sex','batch','age_at_heath_check_10yr'),
+  reference = c("phenotype, 1st","batch,B1"),
+  ncores = 1,
+  output_dir = '/home/kuzmichenko_pa/maaslin_results_16s_pathway/'
+)
+
+results_csv <-  read.csv('/home/kuzmichenko_pa/maaslin_results_16s_pathway/results.csv')
+results_csv 
+results_csv$feature <- gsub('\\..',': ',results_csv$feature)
+```
+#diff_deseq2
+```{r}
+library(DESeq2)
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = "KO",first = 'filter',flag_unclassified = F)
+taxa_names(ps_obj) <- ps_obj@tax_table[,'KO']
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = dplyr::recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels = c("MHN","MUN","MHO","MUO"))
+
+diagdds <- phyloseq::phyloseq_to_deseq2(ps_obj ,~ phenotype + sex + batch + age_at_heath_check_10yr )
+diagdds <- DESeq(diagdds, test="Wald", fitType="parametric", sfType = "poscounts")
+
+contrasts <- list(
+  c("phenotype", 'MHN', 'MUN'),
+  c("phenotype", 'MHN', 'MHO'),
+  c("phenotype", 'MHN', 'MUO'),
+  c("phenotype", 'MUN','MHO'),
+  c("phenotype", 'MUN', 'MUO'),
+  c("phenotype", 'MHO', 'MUO'))
+
+resultsNames(diagdds)
+?octobiom::create_sigtab
+sigtabs_list <- list()
+sigtabs_list <- lapply(contrasts, function(contrast) {
+  tryCatch(
+    octobiom::create_sigtab(ps_obj, diagdds, contrast),
+    error = function(e) {
+      message(paste("Error processing contrast:", paste(contrast, collapse = " vs "), " - ", e$message))
+      return(NULL)
+    }
+  )
+})
+
+
+combined_df <- do.call(rbind, sigtabs_list)
+combined_df
+```
+#combine_diff
+```{r}
+tax_table <- as(phyloseq::tax_table(ps_obj),'data.frame')
+tax_table <- tax_table %>%
+  tibble::rownames_to_column('Taxon')
+tax_tab <- as.matrix(tax_table)
+ps_obj@tax_table <- phyloseq::tax_table(tax_tab)
+
+
+unique_comparison <- unique(results_csv$comparison)
+heatmap_results <- list()
+
+combined_df
+?create_comparison_heatmap
+
+for (current_comparison in unique_comparison) {
+  #current_comparison <- unique_comparison[[1]]
+  results_filtered <- results_csv %>%
+    dplyr::filter(comparison == current_comparison) %>%
+    dplyr::filter(value == strsplit(current_comparison,split='_')[[1]][2])
+  results_filtered$comparison_group <- strsplit(current_comparison,split='_')[[1]][1]
+  results_filtered <- results_filtered %>%
+    dplyr::rename(reference_group = 'value',padj = 'qval',Taxon = 'feature') %>%
+    dplyr::left_join(tax_table , by = 'Taxon') %>%
+    #tibble::rownames_to_column("temp_rowname") %>%
+    #dplyr::mutate(taxa_name = paste0(temp_rowname,'|',Genus)) %>%
+    dplyr::select(Taxon,coef,padj,model,reference_group,comparison_group,comparison)#taxa_names)
+  results_filtered$signif <- ifelse(
+    results_filtered$padj <= 0.001, "***",
+    ifelse(
+      results_filtered$padj <= 0.01, "**",
+      ifelse(results_filtered$padj <= 0.05, "*", "")
+    )
+  )
+  results_filtered <- results_filtered %>%
+    dplyr::filter(padj < 0.05)
+  #combined_df_filtered$taxa_name <- paste0(rownames(combined_df),'|',combined_df$Genus)
+  combined_df_filtered <- combined_df %>%
+    dplyr::filter(comparison == current_comparison) %>%
+    #tibble::rownames_to_column("temp_rowname") %>%
+    #dplyr::mutate(taxa_name = paste0(temp_rowname,'|',Genus)) %>%
+    dplyr::rename(reference_group = 'group1',comparison_group = 'group2') %>%
+    dplyr::select(Taxon,coef,model,comparison,signif,padj,comparison_group,reference_group)#taxa_names)
+  
+  heatmap_results[[current_comparison]]<- octobiom::create_comparison_heatmap(data_deseq = combined_df_filtered,
+                                    data_maaslin = results_filtered,
+                                    ref_group = strsplit(current_comparison,split='_')[[1]][1],
+                                    comp_group = strsplit(current_comparison,split='_')[[1]][2],
+                                    taxa_level = 'Taxon',
+                                    ps_obj,
+                                    group_var_abund_prev = "phenotype",
+                                    group_colors_abund_prev = phenotype_colors,
+                                    comparison_name = current_comparison,
+                                    heatmap_height =10,
+                                    heatmap_width = 8,
+                                    number_model_true = 2,
+                                    output_pathway = '/home/kuzmichenko_pa/maaslin_results_16s_pathway/',
+                                    width_figure = 3500,
+                                    height_figure = 2600
+                                    )
+  
+  }
+?octobiom::create_comparison_heatmap
+
+heatmap_results
+results_filtered
+combined_df_filtered
+strsplit(current_comparison,split='_')[[1]][1]
+ggsave('/home/kuzmichenko_pa/maaslin_results_genus/1_4.png',heatmap_results[[3]]$heatmap_plot,width = 10, height=6,dpi=300)
+
+annotation_legend <- Legend(
+    title = "phenotype",
+    at = names(phenotype_colors),
+    legend_gp = gpar(fill = phenotype_colors),
+    direction = "vertical",
+    labels_gp = gpar(fontsize = text_size)
+  )
+
+png("/home/kuzmichenko_pa/maaslin_results_genus/1_4.png", width = 3000, height = 2600, res = 300, bg = "white")
+ComplexHeatmap::draw(
+  heatmap_results[[3]]$heatmap_obj,
+  heatmap_legend_side = "top",
+  annotation_legend_side = "right",
+  annotation_legend_list = list(annotation_legend)
+)
+dev.off()
+
+```
+#biom split
+```{r}
+library(biomformat)
+seqtab <- read.csv('/mnt/disk1/RUNS/galeeva/picrust_arhan/seqtab.tsv',sep='\t',row.names =1 )
+colnames(seqtab) <- gsub('X','',colnames(seqtab))
+taxa <- readRDS('/mnt/disk1/RUNS/galeeva/picrust_arhan/taxa.rds')
+taxa <- as(taxa,'matrix')
+OTU = otu_table(seqtab, taxa_are_rows = TRUE)
+TAX = phyloseq::tax_table(taxa)
+samples <- ps_obj@sam_data
+ps_biom <- phyloseq(OTU,TAX, samples)
+ps_biom
+```

@@ -1,7 +1,7 @@
 #load phyloseq object
 ```{r}
+library(phyloseq)
 ps <- readr::read_rds('./DATA/ps_phenotype.rds')
-
 #rank_names(ps)
 meta <- as(ps@sam_data,'data.frame')
 unique_ids <- meta %>%
@@ -9,8 +9,16 @@ unique_ids <- meta %>%
 otu <- ps@otu_table
 tax <- ps@tax_table
 ps <- phyloseq(otu,tax, sample_data(unique_ids))
+ps
+tax_tab <- as(tax_table(ps),'data.frame')
+tax_tab$ASV <- rownames(tax_tab)
+tax_tab$taxa_names <- gsub(" ", "_", paste0(tax_tab$ASV, '|', tax_tab$Genus, '|', tax_tab$Species))
+tax_tab <- as.matrix(tax_tab)
+tax_table(ps) <- phyloseq::tax_table(tax_tab)
+
 #duplicate(ps@sam_data$ID_KYH)
 #ps <- readRDS('~/ps_17_22.rds')
+saveRDS(ps,'16s_without_duplicates.rds')
 ```
 #load library
 ```{r}
@@ -115,6 +123,98 @@ save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
    dev.off()
 }
 min_reads <- 1000
+```
+#rarecurve
+```{r}
+otu_long <- as.data.frame(t(ps@otu_table)) %>%
+  rownames_to_column(var = "Taxon") %>%
+  pivot_longer(-Taxon, names_to = "Sample", values_to = "Count")
+
+df_plot <- otu_long %>%
+  group_by(Sample) %>%
+  summarise(TotalReads = sum(Count), .groups = "drop")
+
+df_plot$TotalReads <- as.numeric(df_plot$TotalReads)
+
+library(ggplot2)
+library(patchwork) # Для компоновки графиков
+library(vegan) # Для rarefaction curve
+
+# Основной Violin plot с улучшениями
+violin_plot <- ggplot(df_plot, aes(x = "", y = TotalReads)) +
+  geom_violin(trim = FALSE, fill = "#FFEBAF", color = "black", alpha = 0.7) +
+  geom_boxplot(width = 0.1, fill = "white", color = "black", outlier.shape = NA) +
+  geom_point(aes(y = mean(TotalReads)), 
+             shape = 18, size = 3, color = "black") +
+  geom_label(aes(x = "", y = mean(TotalReads), 
+                label = paste0("Mean = ", round(mean(TotalReads)))),
+            vjust = -1, color = "#4C9DB0", size = 3.5) +
+  labs(x = "", y = "Total Reads") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black"),
+    axis.title = element_text(face = "bold")
+  )
+violin_plot
+# Rarefaction curve (пример)
+# Вам нужно заменить "otu_table" на вашу реальную таблицу OTU
+tab <- as.matrix(otu_table(ps))
+class(tab) <- "matrix"
+
+rare_curves <- rarecurve(tab, step=1000, cex=0.5, label=FALSE)
+rare_curves
+
+sample_names <- rownames(tab)
+
+# Вычисляем максимальную длину
+x_vals <- seq(0, max(sapply(rare_curves, function(x) max(attr(x, "Subsample")))), by=1000)
+
+# Создаём датафрейм для ggplot2
+df <- data.frame(Sample = factor(rep(sample_names, each=length(x_vals))),
+                 Reads = rep(x_vals, times=length(sample_names)),
+                 Richness = NA)
+
+# Заполняем значения Richness для каждого образца
+for(i in 1:length(sample_names)) {
+    subs <- attr(rare_curves[[i]], "Subsample")
+    rich <- rare_curves[[i]]
+    df[df$Sample == sample_names[i], "Richness"] <- approx(subs, rich, x_vals, rule = 2)$y
+}  
+
+rare_data <- do.call(rbind, lapply(1:length(rare_curve), function(i) {
+  data.frame(
+    Reads = attr(rare_curve[[i]], "Subsample"),
+    OTUs = rare_curve[[i]],
+    Sample = i
+  )
+}))
+
+rare_curve_plot <- ggplot(rare_data, aes(x = Reads, y = OTUs,group =Sample)) +
+  geom_line(color = "#ff7029", alpha = 0.5) +
+  labs(x = "Sequencing Depth", y = "Observed OTUs") +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black"),
+    axis.title = element_text(face = "bold")
+  )
+
+combined_plot <- violin_plot + rare_curve_plot + 
+  plot_layout(widths = c(1, 1.5)) +
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag = element_text(face = "bold"))
+
+# Вывод
+print(combined_plot)
+
+# Сохранение
+ggsave("./figures/reads_distribution_with_rarefaction.png", 
+       combined_plot, width = 10, height = 5, dpi = 300)
+  
 ```
 #Heatmap
 ``` {r, fig.height=90, fig.width=70}
@@ -228,25 +328,18 @@ heatmap_object <- Heatmap(t(otu_table),
 draw(heatmap_object,heatmap_legend_side = "top", annotation_legend_side = "top",merge_legend = T)
 ```
 #permanova
-```{r,fig.width=10}
+```{r,fig.width=14}
 source("./code/permanova.R")
-ps_obj <- ps
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = 'taxa_names',first = 'filter')
 ps_obj@sam_data$bmi_group
 ps_obj <- subset_samples(ps_obj, 
                                !is.na(sample_data(ps_obj)$cancer) &
                                !is.na(sample_data(ps_obj)$liver_diseases) &
                                !is.na(sample_data(ps_obj)$dietary_quality_score_cat) &
                                  !is.na(sample_data(ps_obj)$total_phys_act_index)                         )
-level <- 'Genus'
-#level <- F
-year <- '2017 16S'
-det <- 1
-prev<-10/100
 
-ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
-taxas <- core_members(ps_obj, detection = det, prevalence = prev)
-ps_obj <- prune_taxa(taxas, ps_obj)
 ps_obj@sam_data$age <- ps_obj@sam_data$age_at_heath_check_10yr
+factor(ps_obj@sam_data$age_at_heath_check_10yr)
 ps_obj@sam_data$ISCO <- ps_obj@sam_data$ISCO_group
 ps_obj@sam_data$diet_quality <- ps_obj@sam_data$dietary_quality_score_cat
 ps_obj@sam_data$physical_activity <- ps_obj@sam_data$total_phys_act_index
@@ -284,21 +377,25 @@ category_order <- c('comorbidities','sociodemographic','behavioral\n factors', '
 # Reorder the factor levels in cols_meta
 cols_meta$category <- factor(cols_meta$category, levels = category_order)
 
-methods <- c('bray','euclidean')
+methods <- c('euclidean')
 method <- 'bray'
 # Run the plot_permanova function for both methods
 
 palette <- pnw_palette("Spring", n=length(unique(cols_meta$category)))
-threshold <- 0.006
+threshold <- 0.0055
 list_order <- c('phenotype','age','sex', 'education', 'ISCO', 'physical_activity', 'diet_quality', 'smoking_status', 'drinking_level','cancer','kidney_disease','batch')
-
+ps_obj <- ps
+threshold <- 0
+det <- 0
+prev <- 0
+color_palette <- octobiom::get_palette("set_10_3")
 plot_list <- purrr::map(methods, ~ {
   tryCatch({
     plot_permanova(ps_obj, formula, method = .x, 
                    show_plot = TRUE, level = level, 
                    det = det, prev = prev, 
                    year = year, lab.size = lab.size, 
-                   size = 15, cols_meta= cols_meta,palette=colors,threshold =threshold ,threshold_loc_y = 16)
+                   size = 10, cols_meta= cols_meta,palette=color_palette,threshold =threshold ,threshold_loc_y = 16)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
@@ -315,7 +412,9 @@ figure
 #png("~/final_16s_arhangelsk/permanova.pdf", units = "cm",res = 300)
 #figure
 #dev.off()
-ggsave("./figures/permanova.png",figure,dpi=300,height = 10,width=12)
+plot_list[[1]][[2]]
+ggsave("./figures/permanova_asv.png",figure,dpi=300,height = 10,width=12)
+ggsave("~/virus/figures/permanova.png",plot_list[[1]][[2]],dpi=300,height = 6,width=20)
 ```
 #beta and alpha 
 ```{r,fig.height=10}
@@ -364,8 +463,42 @@ figure <- ggarrange(beta,alpha,nrow=1, widths = size,labels = c('A', 'B'))
 figure
 figure[[1]]
 as.factor(ps_obj@sam_data$batch)
-ggsave("./figures/alpha_beta_Genus.png",figure,dpi=300,height = 10,width=15)
+#ggsave("./figures/alpha_beta_Genus.png",figure,dpi=300,height = 10,width=15)
 
+```
+#alpha
+```{r,fig.height=4,fig.width=6}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+                                     first = 'filter')
+?octobiom::create_alpha_plots
+#Let's analyze alpha diversity
+features <- c('phenotype','batch')#,'sex',
+              #"smoking_status","YEAR" )
+color_palette <- octobiom::get_palette("set_10_4")
+plot_alpha_list <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon",'Simpson'))
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_alpha_list_chao <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_alpha_plots(ps, col= .x, colors = color_palette,measure = c("Chao1"))
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_alpha_list_chao
+plot_alpha_list
+
+ggpubr::ggarrange(plot_alpha_list[[1]]$plots,plot_alpha_list_chao[[1]]$plots,widths = c(2,1))
+ggpubr::ggarrange(plot_alpha_list[[2]]$plots,plot_alpha_list_chao[[2]]$plots,widths = c(2,1))
+p.adjust(plot_alpha_list[[1]]$stats$Shannon$p,method = 'BH')
 ```
 # dmm
 ```{r,fig.width=10}
@@ -1224,6 +1357,7 @@ ggsave("./figures/phenotype_features.png",combined_plot,dpi=300,height = 10,widt
 #Get gtdb annotation
 ```{r}
 library(dada2)
+library(biomformat)
 taxa <- assignTaxonomy(ps_obj@refseq, "/mnt/disk1/DATABASES/GTDB_bac120_arc122_ssu_r202_fullTaxo.fa.gz", multithread=10)
 taxa
 ps_obj@refseq[23]
@@ -1233,6 +1367,18 @@ rownames(taxa)[23]
 taxa[23,]
 ps@sam_data$HbA1
 as.character(ps@refseq$ASV53)
+
+?octobiom::prepare_phyloseq
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10,prev = 0.1,taxonomic_level = 'ASV',
+                                     first = 'filter')
+#otu_table <- read.table("otu_table_filtered.tsv", header = TRUE, row.names = 1, sep = ",")
+#biom_obj <- make_biom(data = as.matrix(otu_table))
+#write_biom(biom_obj, "otu_table_filtered.tsv")
+t(ps_obj@otu_table)
+
+write.table(t(ps_obj@otu_table),'otu_table_filtered.txt',sep = "\t",
+            row.names = TRUE)
+write.csv(ps@tax_table,'tax_table.tsv')
 write.csv(ps@sam_data,'meta_16s.csv')
 ```
 
@@ -1281,8 +1427,9 @@ write_tsv(filtered_data, path = "~/filtered_data.tsv")
 
 ```
 #correalation between data
-```{r}
+```{r,fig.height=8}
 df <- read.csv('~/DAVID_WGS/17_num_cols_df.csv')
+df <- read.csv('~/DAVID_WGS/david_all_database_2017.csv')
 df$urine_albumin_mg.L
 df_corr <- df %>% select(age,serum_creatinine_micromol.L,cystatin_C_mg.L,urine_creatinine_micromol.L,urine_albumin_mg.L)
 df_corr <- df_corr %>%
@@ -1326,8 +1473,747 @@ ggplot(df_corr, aes(x = age, y = urine_albumin_mg.L)) +
                       all_results$p_adj),
         size = 3
       )
+cor_data <- df %>%
+  group_by(d_sex) %>%
+  summarise(
+    cor = cor.test(d_age_b, hcd_bmi, method = "pearson")$estimate,
+    p_value = cor.test(d_age_b, hcd_bmi, method = "pearson")$p.value,
+    label = paste0("r = ", round(cor, 2), "\np = ", round(p_value, 3))
+  )
+ggplot(df, aes(x =  d_age_b, y = hcd_bmi)) +
+  geom_smooth()+
+  # Линии и точки с цветом по возрастной группе
+  #geom_line(alpha = 0.7, linewidth = 0.8) +
+  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5) +
+  
+  # Разметка графика
+  labs(
+    x = "age",
+    y = "BMI",
+    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    legend.position = "right",
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.spacing = unit(1, "lines")
+  )+
+  facet_grid(
+    cols = vars(d_sex),  # Увеличение/уменьшение
+    #cols = vars(YEAR),               # Пол
+    scales = "free_y",              # Свободная шкала Y для каждого фасета
+  )+
+  geom_text(
+    data = cor_data,
+    aes(x = Inf, y = Inf, label = label),
+    hjust = 1.1, vjust = 1.1,
+    size = 4
+  )
+ggplot(df, aes(x =  d_age_b, y = hcd_bmi)) +
+  geom_smooth()+
+  # Линии и точки с цветом по возрастной группе
+  #geom_line(alpha = 0.7, linewidth = 0.8) +
+  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5) +
+  
+  # Разметка графика
+  labs(
+    x = "age",
+    y = "BMI",
+    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    legend.position = "right",
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.spacing = unit(1, "lines")
+  )+
+  facet_grid(
+    cols = vars(d_sex),  # Увеличение/уменьшение
+    #cols = vars(YEAR),               # Пол
+    scales = "free_y",              # Свободная шкала Y для каждого фасета
+  )+
+  geom_text(
+    data = cor_data,
+    aes(x = Inf, y = Inf, label = label),
+    hjust = 1.1, vjust = 1.1,
+    size = 4
+  )
+
+ps_obj<- ps
+
+level <- 'Species'
+det <- 10
+prev<-5/100
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj_species <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+
+# 1. Рассчитать индекс Шеннона
+data_alpha <- estimate_richness(ps_obj, measures = "Shannon")
+meta <- as(ps@sam_data,'data.frame')
+meta$age_at_heath_check_10yr
+plot_data <- meta %>%
+  select(ID_KYH,age_at_heath_check,sex,BMI,age_at_heath_check_10yr,smoking_status) %>%
+  mutate(
+    ID_KYH = factor(ID_KYH),
+    sex=as.factor(sex),
+    smoking_status = as.factor(smoking_status)
+  ) %>%
+  arrange(ID_KYH)
+
+plot_data <- merge(plot_data,data_alpha,by='row.names')
+plot_data <- plot_data %>%
+  mutate(Shannon = as.numeric(Shannon),
+         age_at_heath_check = as.numeric(age_at_heath_check),
+         BMI = as.numeric(BMI))
+
+
+shannon <- ggplot(plot_data, aes(x = age_at_heath_check, y = Shannon)) +
+  geom_smooth()+
+  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5,alpha = 0.4) +
+
+  # Разметка графика
+  labs(
+    x = "age",
+    y = "Shannon Index",
+    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    legend.position = "right",
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.spacing = unit(1, "lines")
+  )+
+  facet_grid(
+    rows = vars(sex),  # Увеличение/уменьшение
+    #cols = vars(YEAR),               # Пол
+    scales = "free_y",              # Свободная шкала Y для каждого фасета
+  ) 
+
+bmi <- ggplot(plot_data, aes(x = age_at_heath_check, y = BMI)) +
+  geom_smooth()+
+  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5,alpha = 0.4) +
+
+  # Разметка графика
+  labs(
+    x = "age",
+    y = "BMI",
+    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    legend.position = "right",
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.spacing = unit(1, "lines")
+  )+
+  facet_grid(
+    rows = vars(sex),  # Увеличение/уменьшение
+    #cols = vars(YEAR),               # Пол
+    scales = "free_y",              # Свободная шкала Y для каждого фасета
+  ) 
+shannon | bmi
 ```
+#diff_analysis
+```{r}
+?octobiom::prepare_phyloseq
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,agglomeration_flag = F,first = 'filter')
+
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = dplyr::recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels = c("MHN","MUN","MHO","MUO"))
+
+diagdds <- phyloseq::phyloseq_to_deseq2(ps_obj ,~ phenotype)
+diagdds <- DESeq(diagdds, test="Wald", fitType="parametric", sfType = "poscounts")
+contrasts <- list(c("phenotype", 'MUN', 'MHN'), c("phenotype", 'MHO', 'MHN'), c("phenotype", 'MUO', 'MHN'),c("phenotype", 'MHO','MUN'),c("phenotype", 'MUO', 'MUN'),c("phenotype", 'MUO', 'MHO'))
+resultsNames(diagdds)
+?octobiom::create_sigtab
+sigtabs_list <- list()
+sigtabs_list <- lapply(contrasts, function(contrast) {
+  tryCatch(
+    octobiom::create_sigtab(ps_obj, diagdds, contrast),
+    error = function(e) {
+      message(paste("Error processing contrast:", paste(contrast, collapse = " vs "), " - ", e$message))
+      return(NULL)
+    }
+  )
+})
+
+combined_df <- do.call(rbind, sigtabs_list)
+?octobiom::create_comparison_plots
+combined_df
+
+library(Maaslin2)
+?octobiom::process_maaslin
+
+# Define methods
+methods <- list(
+  list(analysis_method = "CPLM", normalization = "TSS", transform = "NONE"),
+  list(analysis_method = "LM", normalization = "TSS", transform = "LOG"),
+  list(analysis_method = "LM", normalization = "CLR", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "CSS", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "TMM", transform = "NONE")
+)
+?process_maaslin
+results <- process_maaslin(
+  ps_obj = ps_obj,
+  contrasts = contrasts,
+  methods = methods,
+  output_dir = '/home/kuzmichenko_pa/maaslin_test_16S/',
+  ncores = 30
+)
+
+results
+comparison <- 'Lean vs Obesity'
+ref_group <- "Obesity"
+comp_group <- "Lean"
+
+
+combined_df<- combined_df %>%
+  dplyr::rename(comparison_group = 'group1',reference_group = 'group2')
+combined_df <- combined_df %>%
+  select(Taxon,coef,model,comparison,signif,padj,Species,comparison_group,reference_group)
+results_df <- results %>%
+  select(Taxon,coef,model,comparison,signif,padj,Species,comparison_group,reference_group)
+bmi_colors <- c(
+  'Lean' = "#FF8400",
+  'Overweight' = "#3C096C",
+  'Obesity' = "#FF0A54"
+)
+?create_comparison_heatmap
+
+heatmap_results<- octobiom::create_comparison_heatmap(data_deseq = combined_df,
+                                    data_maaslin = results_df,
+                                    ref_group = ref_group,
+                                    comp_group = comp_group,
+                                    taxa_level = 'Species',
+                                    ps_obj,
+                                    group_var_abund_prev = "bmi_group",
+                                    group_colors_abund_prev = bmi_colors,
+                                    comparison_name = comparison,
+                                    heatmap_height =14,
+                                    heatmap_width = 5
+                                    )
+heatmap_results$heatmap_plot
+
+
+```
+#correlation between features and taxa
+```{r,fig.height=6}
+?octobiom::prepare_phyloseq
+meta <- as(phyloseq::sample_data(ps),'data.frame')
+meta$mean_height_cm <- as.numeric(as.character(meta$mean_height_cm))
+meta$weight_tanita <- as.numeric(as.character(meta$weight_tanita))
+meta$bmi <- meta$weight_tanita/(meta$mean_height_cm/100)**2
+ps@sam_data <- sample_data(meta)
+
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'clr',detection = 10, prevalence = 0.05,taxonomic_level ='Genus' ,first = 'filter')
+octobiom::get_palette('set_10_4')
+
+feature_colors <- c(
+  "age_at_heath_check" = "#FF8400",
+  "bmi" = "#3C096C",
+  'hs.CRP_mg.L' = "#FF0A54",
+  'HbA1C_.'="#2D00F7",
+  'HDL_cholesterol_mmol.L' ="#029191",
+  'triglycerides_mmol.L' ="#08415C"
+)
+ps_obj@sam_data$bmi <- as.numeric(ps_obj@sam_data$bmi)
+ps_obj@sam_data$age_at_heath_check <- as.numeric(ps_obj@sam_data$age_at_heath_check)
+ps_obj@sam_data$`hs.CRP_mg.L` <- as.numeric(ps_obj@sam_data$`hs.CRP_mg.L`)
+ps_obj@sam_data$`HbA1C_.` <- as.numeric(ps_obj@sam_data$`HbA1C_.`)
+ps_obj@sam_data$`HDL_cholesterol_mmol.L` <- as.numeric(ps_obj@sam_data$`HDL_cholesterol_mmol.L`)
+ps_obj@sam_data$`triglycerides_mmol.L` <- as.numeric(ps_obj@sam_data$`triglycerides_mmol.L`)
+?build_multi_correlation_network
+
+network_correlation_results <- octobiom::build_multi_correlation_network(
+  ps_obj,
+  features = c("age_at_heath_check", "bmi",'hs.CRP_mg.L','HbA1C_.','HDL_cholesterol_mmol.L','triglycerides_mmol.L'),
+  tax_rank = "Genus",
+  cor_method = 'pearson',
+  feature_colors = feature_colors
+)
+network_correlation_results
+
+ps_obj@tax_table['Genus' == 'UCG-005',]
+ps_obj@tax_table %>%
+  as.data.frame()%>%
+  filter(Genus == 'UCG-005')
+```
+#Dif analysis
+```{r,fig.height=8}
+#Let's apply differential abundance analysis using the DESEq2 tool
+#Prepare dataset. We need count data.
+saveRDS(ps,'~/DAVID_WGS/16s_diff_analysis/Genus/data/arkh/arkh.rds')
+ps@sam_data$phenotype <- as.factor(ps@sam_data$phenotype)
+ps@sam_data$phenotype
+
+library(ComplexHeatmap)
+library(colorRamp2)
+lgd_signif = Legend(title = "significance", col_fun = colorRamp2(c(0, 0.05,0.1), c("#8c1c13", "#bf4342","#e7d7c1")), at = c(0, 0.05, 0.1), 
+    labels = c('0', '0.05','0.1'))
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap <- readRDS("~/DAVID_WGS/16s_diff_analysis/ASV/heatmaps/deseq2__maaslin2_cplm_negbin_tmm_lm_clr_1st_vs_2nd_heatmap.rds")
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap
+png('~/DAVID_WGS/16s_diff_analysis/ASV/DA_metaphlan_1st_vs_2nd.png', height = 3500, width = 3700,res=300)
+ draw(deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap, heatmap_legend_side = "top", annotation_legend_side = "top", merge_legend = TRUE,annotation_legend_list =c(lgd_signif),
+       ht_gap = unit(c(15, 15), "mm"))
+dev.off()
+
+
+```
+#Hir clustering
+```{r,fig.height=10}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.01,taxonomic_level = 'Genus',
+                                     first = 'filter')
+?octobiom::barplot_hierarchical
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+#Creates a stacked barplot of taxonomic compositions with hierarchical clustering dendrogram and sample metadata annotations for top taxa.
+unique(ps_obj@sam_data$age_at_heath_check_10yr)
+phenotype_colors <- c(
+  'MHN' = '#a7c957',
+  'MUN' = '#b80c09',
+  "MHO" = '#0b4f6c',
+  "MUO" = "#D5B3FF"
+)
+age_colors <- c(
+  '35-44'='#48cae4',#blue
+  '45-54' = '#a24f7c' ,
+  '55-64'='#ff6b35',#orange
+  '65+' = '#ef233c' #red
+)
+sex_colors <- c(
+    'female'='#ff5c8a',
+    'male' = '#0466c8'
+  )
+batch_colors <- c(
+  'B1' = '#a7c957',
+  'B3' = '#b80c09',
+  "B4" = '#0b4f6c',
+  "B6" = "#D5B3FF"
+)
+features <- c('phenotype','batch','sex',"age_at_heath_check_10yr" )
+color_palette <- octobiom::get_palette("set_20_2")
+color_palette <- c('white',color_palette)
+colors_annotation <- list('batch' = batch_colors,'phenotype' = phenotype_colors,
+                                                                     'age_at_heath_check_10yr' = age_colors,'sex' = sex_colors)
+barplot_results <- octobiom::barplot_hierarchical(ps_obj,taxrank="Genus", top = 20, feature = features,
+                                      dist = 'bray',colors_barplot = color_palette,
+                                   colors_annotation = colors_annotation,decreasing = T,
+                                   size = c(0.5,0.2,0.2,0.2,0.2,5))
+barplot_results
+#ggsave('./figures/barplot_hierarchical.png',barplot_results,dpi = 300,width = 16,height = 10)
+```
+#Correlation
+```{r,fig.height=8}
+library(octobiom)
+
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10,prev = 0.1,taxonomic_level = 'taxa_names',
+                                     first = 'filter')
+taxa_names(ps_obj) <- ps_obj@tax_table[,'taxa_names']
+otu_tab <- as.data.frame(t(ps_obj@otu_table))
+otu_tab
+
+# Настройки
+output_root <- "~/DAVID_WGS/fastspar_output"
+n_bootstraps <- 2  # Тестово 2 итерации (можно увеличить до 30+)
+base_otu_name <- "otu_table_filtered"
+conda_env <- "fastspar"
+threads <- 10
+cor_threshold <- 0.3
+
+if (!dir.exists(output_root)) {
+  dir.create(output_root, recursive = TRUE)
+}
+
+
+all_network_results <- list()
+
+for (i in 1:n_bootstraps) {
+
+  otu_boot <- octobiom::bootstrap_otu_table(otu_tab,sample_size=300,with_replacement = F,random_seed = i)
+
+  boot_id <- sprintf("boot%02d", i)  # boot01, boot02, ...
+  output_dir <- file.path(output_root, paste0("results_", boot_id))
+  otu_filename <- paste0(base_otu_name, "_", boot_id, ".txt")
+  
+
+  dir.create(output_dir, showWarnings = FALSE)
+  df_to_write <- data.frame("#OTU ID" = rownames(otu_boot), otu_boot, check.names = FALSE)
+  write.table(
+    df_to_write,
+    file = file.path(output_root, otu_filename),
+    sep = "\t",
+    row.names = FALSE,     
+    quote = FALSE,
+    col.names = TRUE
+  ) 
+}
+  
+for (i in 1:n_bootstraps) {
+  boot_id <- sprintf("boot%02d", i)
+  output_dir <- file.path(output_root, paste0("results_", boot_id))
+  otu_filename <- paste0(base_otu_name, "_", boot_id, ".txt")
+  network_res <- octobiom::run_fastspar_analysis(
+    conda_env = conda_env,
+    input_dir = output_root,
+    output_dir = output_dir,
+    otu_table = otu_filename,
+    threads = threads,
+    ps_obj = ps_obj,
+    cor_threshold = cor_threshold
+  )
+  
+
+  all_network_results[[boot_id]] <- list(
+    otu_table = otu_boot,
+    graph = network_res$graph,
+    network = network_res$plot,
+    network_stats = network_res$network_stats,
+    boot_id = boot_id
+  )
+  
+
+  #saveRDS(network_res, file.path(output_dir, paste0("network_results_", boot_id, ".rds")))
+}
+all_network_results$boot01
+all_network_results$boot02
+# Сохранение всех результатов в один файл
+saveRDS(all_network_results, file.path(output_root, "combined_network_results.rds"))
+
+# Вывод структуры результатов
+str(all_network_results, max.level = 2)
+#rank_names(ps)
+
+
+?octobiom::bootstrap_otu_table
+otu_bootstrap <- octobiom::bootstrap_otu_table(otu_table = otu_tab,sample_size=300,with_replacement = F,random_seed = 42)
+otu_bootstrap
+write.table(t(ps_obj@otu_table),'~/DAVID_WGS/fastspar_output/otu_table_filtered.txt',sep = "\t",
+            row.names = TRUE)
+?octobiom::run_fastspar_analysis
+
+networks_results <- run_fastspar_analysis(conda_env = "fastspar",
+                                          input_dir = '~/DAVID_WGS/fastspar_output',
+                                          output_dir = '~/DAVID_WGS/fastspar_output/results',
+                                          otu_table = 'otu_table_filtered.txt',
+                                          threads = 10,ps_obj = ps_obj,cor_threshold = 0.5)
+networks_results$plot
+
+```
+#Differential analysis DESEQ2
+```{r,fig.height=5}
+library(DESeq2)
+library(phyloseq)
+#Let's apply differential abundance analysis using the DESEq2 tool
+#Prepare dataset. We need count data.
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = 'taxa_names',first = 'filter')
+
+diagdds <- phyloseq::phyloseq_to_deseq2(ps_obj ,~ phenotype + sex + batch + age_at_heath_check_10yr + smoking_status + drinking_level)
+diagdds <- DESeq(diagdds, test="Wald", fitType="parametric", sfType = "poscounts")
+
+
+contrasts <- list(
+  c("phenotype", '1st', '2nd'),
+  c("phenotype", '1st', '3rd'),
+  c("phenotype", '1st', '4th'),
+  c("phenotype", '2nd','3rd'),
+  c("phenotype", '2nd', '4th'),
+  c("phenotype", '3rd', '4th'))
+contrast
+resultsNames(diagdds)
+?octobiom::create_sigtab
+sigtabs_list <- list()
+sigtabs_list <- lapply(contrasts, function(contrast) {
+  tryCatch(
+    octobiom::create_sigtab(ps_obj, diagdds, contrast),
+    error = function(e) {
+      message(paste("Error processing contrast:", paste(contrast, collapse = " vs "), " - ", e$message))
+      return(NULL)
+    }
+  )
+})
+
+identical(sort(taxa_names(ps_obj)), sort(rownames(diagdds)))
+combined_df <- do.call(rbind, sigtabs_list)
+?octobiom::create_comparison_plots
+combined_df
+?octobiom::calculate_abundance_stats
 
 
 
+comparison_names <- unique(combined_df$comparison)
 
+phenotype_colors <- c(
+  '1st' = '#a7c957',
+  '2nd' = '#b80c09',
+  "3rd" = '#0b4f6c',
+  "4th" = "#D5B3FF"
+)
+phylum_colors <- c(
+  'Euryarchaeota'              = "#001219" ,
+  'Thaumarchaeota'             = "#005f73" ,
+  'Actinobacteria'             = "#0a9396" ,
+  'Bacteria_unclassified'      = "#94d2bd" ,
+  'Bacteroidetes'              = "#e9d8a6" ,
+  'Candidatus_Melainabacteria' = "#ee9b00" ,
+  'Candidatus_Saccharibacteria'= "#ca6702" ,
+  'Firmicutes'                 = "#bb3e03" ,
+  'Fusobacteria'               = "#ae2012" ,
+  'Lentisphaerae'              = "#9b2226" ,
+  'Proteobacteria'             = '#F55B66' ,
+  'Synergistetes'              = '#ACACAC' ,
+  'Tenericutes'                = '#5CD5DA' ,
+  'Verrucomicrobia'            = '#0089DF' ,
+  'Ascomycota'                 = '#19427D'
+)
+plot_diff_list <- purrr::map(comparison_names, ~ {
+  tryCatch({
+    octobiom::create_comparison_barplot(data = combined_df, comparison_name = .x, group_var_abund_prev = "phenotype",
+                                                group_var_fold_change = "Phylum",
+                                                ps_obj = ps_obj,
+                                                group_colors_abund_prev =  phenotype_colors,
+                                                group_colors_fold_change = phylum_colors)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_diff_list
+
+```
+```{r,fig.height=6}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = 'taxa_names',first = 'filter')
+
+?octobiom::process_maaslin
+# Define methods
+
+?process_maaslin
+methods <- list(
+  list(analysis_method = "CPLM", normalization = "TSS", transform = "NONE"),
+  list(analysis_method = "LM", normalization = "TSS", transform = "LOG"),
+  list(analysis_method = "LM", normalization = "CLR", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "CSS", transform = "NONE"),
+  list(analysis_method = "CPLM", normalization = "TMM", transform = "NONE")
+)
+
+#results <- process_maaslin(
+#  ps_obj = ps_obj,
+#  comparison_group = "phenotype",
+#  methods = methods,
+#  fixed_effects = c("phenotype",'sex','batch','age_at_heath_check_10yr','smoking_status','drinking_level'),
+#  reference = c("phenotype, 1st","batch,B1","smoking_status,No, ex-smoker","drinking_level,Non-problem drinkers"),
+#  ncores = 1,
+#  output_dir = '/home/kuzmichenko_pa/maaslin_results_asv/'
+#)
+results <- read.csv('/home/kuzmichenko_pa/maaslin_results_asv/results.csv')
+
+tax_table <- as(phyloseq::tax_table(ps_obj),'data.frame')
+tax_table <- tax_table %>%
+  tibble::rownames_to_column('Taxon')
+
+unique_comparison <- unique(results$comparison)
+heatmap_results <- list()
+
+combined_df
+?create_comparison_heatmap
+
+for (current_comparison in unique_comparison) {
+  #current_comparison <- unique_comparison[[6]]
+  results_filtered <- results %>%
+    dplyr::filter(comparison == current_comparison) %>%
+    dplyr::filter(value == strsplit(current_comparison,split='_')[[1]][2])
+  results_filtered$comparison_group <- strsplit(current_comparison,split='_')[[1]][1]
+  results_filtered <- results_filtered %>%
+    dplyr::rename(reference_group = 'value',padj = 'qval',Taxon = 'feature') %>%
+    dplyr::left_join(tax_table , by = 'Taxon') %>%
+    #tibble::rownames_to_column("temp_rowname") %>%
+    #dplyr::mutate(taxa_name = paste0(temp_rowname,'|',Genus)) %>%
+    dplyr::select(Taxon,coef,padj,model,reference_group,comparison_group,comparison,taxa_names)#taxa_names)
+  results_filtered$signif <- ifelse(
+    results_filtered$padj <= 0.001, "***",
+    ifelse(
+      results_filtered$padj <= 0.01, "**",
+      ifelse(results_filtered$padj <= 0.05, "*", "")
+    )
+  )
+  results_filtered <- results_filtered %>%
+    dplyr::filter(padj < 0.05)
+  #combined_df_filtered$taxa_name <- paste0(rownames(combined_df),'|',combined_df$Genus)
+  combined_df_filtered <- combined_df %>%
+    dplyr::filter(comparison == current_comparison) %>%
+    #tibble::rownames_to_column("temp_rowname") %>%
+    #dplyr::mutate(taxa_name = paste0(temp_rowname,'|',Genus)) %>%
+    dplyr::rename(reference_group = 'group1',comparison_group = 'group2') %>%
+    dplyr::select(Taxon,coef,model,comparison,signif,padj,comparison_group,reference_group,taxa_names)#taxa_names)
+  
+  heatmap_results[[current_comparison]]<- octobiom::create_comparison_heatmap(data_deseq = combined_df_filtered,
+                                    data_maaslin = results_filtered,
+                                    ref_group = strsplit(current_comparison,split='_')[[1]][1],
+                                    comp_group = strsplit(current_comparison,split='_')[[1]][2],
+                                    taxa_level = 'taxa_names',
+                                    ps_obj,
+                                    group_var_abund_prev = "phenotype",
+                                    group_colors_abund_prev = phenotype_colors,
+                                    comparison_name = current_comparison,
+                                    heatmap_height =10,
+                                    heatmap_width = 8,
+                                    number_model_true = 3,
+                                    output_pathway = '/home/kuzmichenko_pa/maaslin_results_asv/',
+                                    width_figure = 3000,
+                                    height_figure = 2600
+                                    )
+  
+}
+
+
+heatmap_results
+results_filtered
+combined_df_filtered
+strsplit(current_comparison,split='_')[[1]][1]
+ggsave('/home/kuzmichenko_pa/maaslin_results_genus/1_4.png',heatmap_results[[3]]$heatmap_plot,width = 10, height=6,dpi=300)
+
+annotation_legend <- Legend(
+    title = "phenotype",
+    at = names(phenotype_colors),
+    legend_gp = gpar(fill = phenotype_colors),
+    direction = "vertical",
+    labels_gp = gpar(fontsize = text_size)
+  )
+
+png("/home/kuzmichenko_pa/maaslin_results_genus/1_4.png", width = 3000, height = 2600, res = 300, bg = "white")
+ComplexHeatmap::draw(
+  heatmap_results[[3]]$heatmap_obj,
+  heatmap_legend_side = "top",
+  annotation_legend_side = "right",
+  annotation_legend_list = list(annotation_legend)
+)
+dev.off()
+```
+#Beta
+```{r,fig.height=8,fig.width=8}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+                                     first = 'filter')
+?octobiom::create_ordination_plots
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = dplyr::recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
+ps_obj@sam_data$phenotype <- factor(ps_obj@sam_data$phenotype,levels = c('MHN','MUN','MHO','MUO'))
+ps_obj@sam_data$batch <- factor(ps_obj@sam_data$batch,levels = c('B1','B3','B4','B6'))
+
+#Let's analyze beta diversity
+features <- c('phenotype','batch')
+?octobiom::create_ordination_plots
+group <- c('phenotype','batch')
+
+color_palette <- c(octobiom::get_palette("set_2_1"),octobiom::get_palette("set_2_3"))
+additional_palette <- octobiom::get_palette("set_10_4")
+plot_beta_list <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_ordination_plots(ps_obj, group= .x, 
+                                      distance_method = "bray",palette = color_palette,taxa_plot = FALSE)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot(plot_beta_list[[1]])
+plot(plot_beta_list[[2]])
+
+ggsave('./figures/beta_phenotypes_genus.png',plot_beta_list[[1]],dpi=300,width=10,height=10)
+ggsave('./figures/beta_batch_genus.png',plot_beta_list[[2]],dpi=300,width=10,height=10)
+
+?octobiom::create_ordination_plots_double
+beta_double <- create_ordination_plots_double(ps_obj,
+                                              group = 'phenotype',
+                                              additional_group = 'batch',
+                                              palette = color_palette,
+                                              additional_palette = additional_palette ,
+                                              shape_palette = c(1,2,3,4),ratio = c(3, 5)
+                                              )
+ggsave('./figures/beta_phenotypes_batch_asv.png',beta_double,dpi=300,width=11,height=10)
+plot(beta_double)
+```
+#Alpha
+```{r,fig.height=5}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+                                     first = 'filter')
+?octobiom::create_alpha_plots
+#Let's analyze alpha diversity
+features <- c('phenotype')#,'sex',
+              #"smoking_status","YEAR" )
+color_palette <- octobiom::get_palette("set_10_4")
+plot_alpha_list <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon",'Simpson'))
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_alpha_list_chao <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_alpha_plots(ps, col= .x, colors = color_palette,measure = c("Chao1"))
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_alpha_list_chao
+
+p <- ggpubr::ggarrange(plot_alpha_list[[1]]$plots,plot_alpha_list_chao[[1]]$plots,widths = c(2,1))
+ggsave('./figures/alpha_phenotype_asv.png',p,dpi=300,width=8,height=6)
+```
+#Сети 
+```{r,fig.height=8,fig.width=8}
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.15,taxonomic_level = 'taxa_names',first = 'filter')
+otu_tab <- t(ps_obj@otu_table)
+df_to_write <- data.frame("#OTU ID" = rownames(otu_tab), otu_tab, check.names = FALSE)
+write.table(
+    df_to_write,
+    file ='~/DAVID_WGS/fastspar_output/otu_table_filtered.txt',
+    sep = "\t",
+    row.names = FALSE,     
+    quote = FALSE,
+    col.names = TRUE
+  ) 
+#write.table(t(ps_obj@otu_table),'~/DAVID_WGS/fastspar_output/otu_table_filtered.txt',sep = "\t",
+#            row.names = TRUE)
+?octobiom::run_fastspar_analysis
+
+networks_results <- run_fastspar_analysis(conda_env = "fastspar",
+                                          input_dir = '~/DAVID_WGS/fastspar_output',
+                                          output_dir = '~/DAVID_WGS/fastspar_output/results',
+                                          otu_table = 'otu_table_filtered.txt',
+                                          threads = 10,ps_obj = ps_obj,cor_threshold = 0.5)
+
+```
