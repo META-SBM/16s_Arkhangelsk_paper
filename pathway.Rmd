@@ -13,13 +13,6 @@ library(patchwork)
 ```{r}
 ps <- readRDS('./DATA/ps_16s_pathway.rds')
 
-meta <- as(ps@sam_data,'data.frame')
-unique_ids <- meta %>%
-  distinct(ID_KYH, .keep_all = TRUE)
-otu <- ps@otu_table
-tax <- ps@tax_table
-ps <- phyloseq(otu,tax, sample_data(unique_ids))
-ps
 
 colors <- c('#34b9ed','#a100bf',
 '#f7b126','#bf4380','#1d8dcf',
@@ -32,7 +25,7 @@ colors <- c('#34b9ed','#a100bf',
 ```
 #permanova
 ```{r,fig.width=14}
-source("./code/permanova.R")
+#source("./code/permanova.R")
 ?octobiom::prepare_phyloseq
 ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,agglomeration_flag = F,first = 'filter',flag_unclassified = F)
 
@@ -203,8 +196,9 @@ ggsave('./figures/final_pathway_hier_beta.png',final_pathway,dpi=300,width=25,he
 #diff_analysis_maaslin
 ```{r}
 ?octobiom::prepare_phyloseq
-ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = "KO",first = 'filter',flag_unclassified = F)
-taxa_names(ps_obj) <- ps_obj@tax_table[,'KO']
+#ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = "KO",first = 'filter',flag_unclassified = F)
+ps_obj <- octobiom::prepare_phyloseq(ps_ko,transformation = 'NONE',detection = 10, prevalence = 0.05,taxonomic_level = "V2",first = 'filter',flag_unclassified = F)
+#taxa_names(ps_obj) <- paste0(ps_obj@tax_table[,'V1'],ps_obj@tax_table[,'V2'])
 
 meta <- as(ps_obj@sam_data,'data.frame')
 meta <- meta %>%
@@ -222,24 +216,25 @@ library(Maaslin2)
 
 # Define methods
 methods <- list(
-  list(analysis_method = "CPLM", normalization = "TSS", transform = "NONE"),
-  list(analysis_method = "LM", normalization = "TSS", transform = "LOG"),
-  list(analysis_method = "LM", normalization = "CLR", transform = "NONE"),
-  list(analysis_method = "CPLM", normalization = "CSS", transform = "NONE"),
+  #list(analysis_method = "CPLM", normalization = "TSS", transform = "NONE"),
+  #list(analysis_method = "LM", normalization = "TSS", transform = "LOG"),
+  #list(analysis_method = "LM", normalization = "CLR", transform = "NONE"),
+  #list(analysis_method = "CPLM", normalization = "CSS", transform = "NONE"),
   list(analysis_method = "CPLM", normalization = "TMM", transform = "NONE")
 )
+ps_obj@sam_data$age_at_heath_check_10yr
 ?process_maaslin
 results <- process_maaslin(
   ps_obj = ps_obj,
   comparison_group = "phenotype",
   methods = methods,
   fixed_effects = c("phenotype",'sex','batch','age_at_heath_check_10yr'),
-  reference = c("phenotype, 1st","batch,B1"),
-  ncores = 1,
-  output_dir = '/home/kuzmichenko_pa/maaslin_results_16s_pathway/'
+  reference = c("phenotype,MHN","batch,B1","age_at_heath_check_10yr,35-44"),
+  ncores = 40,
+  output_dir = '/home/kuzmichenko_pa/maaslin_results_16s_ko/'
 )
 
-results_csv <-  read.csv('/home/kuzmichenko_pa/maaslin_results_16s_pathway/results.csv')
+results_csv <-  read.csv('/home/kuzmichenko_pa/maaslin_results_16s_ko/results.csv')
 results_csv 
 results_csv$feature <- gsub('\\..',': ',results_csv$feature)
 ```
@@ -374,16 +369,7 @@ ComplexHeatmap::draw(
 dev.off()
 
 ```
-#biom split
+#ko
 ```{r}
-library(biomformat)
-seqtab <- read.csv('/mnt/disk1/RUNS/galeeva/picrust_arhan/seqtab.tsv',sep='\t',row.names =1 )
-colnames(seqtab) <- gsub('X','',colnames(seqtab))
-taxa <- readRDS('/mnt/disk1/RUNS/galeeva/picrust_arhan/taxa.rds')
-taxa <- as(taxa,'matrix')
-OTU = otu_table(seqtab, taxa_are_rows = TRUE)
-TAX = phyloseq::tax_table(taxa)
-samples <- ps_obj@sam_data
-ps_biom <- phyloseq(OTU,TAX, samples)
-ps_biom
+ps_ko <- readRDS('/mnt/disk1/RUNS/kuzmichenko_pa/16s_arkhangelsk/DATA/ps_ko.rds')
 ```

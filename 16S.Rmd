@@ -5,7 +5,8 @@ ps <- readr::read_rds('./DATA/ps_phenotype.rds')
 #rank_names(ps)
 meta <- as(ps@sam_data,'data.frame')
 unique_ids <- meta %>%
-  distinct(ID_KYH, .keep_all = TRUE)
+  distinct(ID_KYH, .keep_all = TRUE) 
+
 otu <- ps@otu_table
 tax <- ps@tax_table
 ps <- phyloseq(otu,tax, sample_data(unique_ids))
@@ -2216,4 +2217,10 @@ networks_results <- run_fastspar_analysis(conda_env = "fastspar",
                                           otu_table = 'otu_table_filtered.txt',
                                           threads = 10,ps_obj = ps_obj,cor_threshold = 0.5)
 
+```
+#metadata
+```{r}
+df <- read.csv('/home/kuzmichenko_pa/updated_meta_16s.csv',sep=',')
+df[,c('hs.CRP_mg.L','new_id')]
+df$hs.CRP_mg.L
 ```
