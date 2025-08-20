@@ -21,6 +21,34 @@ tax_table(ps) <- phyloseq::tax_table(tax_tab)
 #ps <- readRDS('~/ps_17_22.rds')
 saveRDS(ps,'16s_without_duplicates.rds')
 ```
+#duplicate
+```{r}
+library(phyloseq)
+library(dplyr)
+
+ps <- readr::read_rds('./DATA/ps_phenotype.rds')
+
+meta <- as(ps@sam_data,'data.frame')
+meta$ID_KYH <- as.character(meta$ID_KYH)
+meta$ID_KYH
+
+duplicated_ids <- meta %>%
+  group_by(ID_KYH) %>%
+  summarise(count = n()) %>%
+  filter(count > 1) %>%
+  pull(ID_KYH)
+
+# Фильтруем только те образцы, которые имеют дубликаты
+duplicated_samples <- meta %>%
+  filter(ID_KYH %in% duplicated_ids)
+
+# Создаем phyloseq объект только с дублированными образцами
+ps_duplicated <- subset_samples(ps, ID_KYH %in% duplicated_ids)
+
+
+
+
+```
 #load library
 ```{r}
 library(phyloseq)
