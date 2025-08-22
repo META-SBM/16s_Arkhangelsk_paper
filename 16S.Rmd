@@ -2,6 +2,7 @@
 ```{r}
 library(phyloseq)
 ps <- readr::read_rds('./DATA/ps_phenotype.rds')
+
 #rank_names(ps)
 meta <- as(ps@sam_data,'data.frame')
 unique_ids <- meta %>%
@@ -19,10 +20,11 @@ tax_table(ps) <- phyloseq::tax_table(tax_tab)
 
 #duplicate(ps@sam_data$ID_KYH)
 #ps <- readRDS('~/ps_17_22.rds')
+write.csv(as(ps@sam_data,'data.frame'),'./DATA/meta.csv') 
 saveRDS(ps,'16s_without_duplicates.rds')
 ```
 #duplicate
-```{r}
+```{r,fig.height=8,fig.width=10}
 library(phyloseq)
 library(dplyr)
 
@@ -45,7 +47,18 @@ duplicated_samples <- meta %>%
 # Создаем phyloseq объект только с дублированными образцами
 ps_duplicated <- subset_samples(ps, ID_KYH %in% duplicated_ids)
 
-
+ps_obj <- octobiom::prepare_phyloseq(ps_duplicated,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'Genus',
+                                     first = 'filter')
+?octobiom::barplot_hierarchical
+#Creates a stacked barplot of taxonomic compositions with hierarchical clustering dendrogram and sample metadata annotations for top taxa.
+features <- c('batch' )
+color_palette <- octobiom::get_palette("set_20_2")
+color_palette <- c('white',color_palette)
+colors_annotation <- list('batch' = octobiom::get_palette("set_10_2"))
+octobiom::barplot_hierarchical(ps_obj,taxrank="Genus", top = 20, feature = features,
+                                      dist = 'bray',colors_barplot = color_palette,
+                                   colors_annotation = colors_annotation,decreasing = T,
+                                   size = c(0.5,0.5,5),colnames = T)
 
 
 ```
@@ -1383,274 +1396,9 @@ combined_plot
 ggsave("./figures/phenotype_features.png",combined_plot,dpi=300,height = 10,width=20)
 
 ```
-#Get gtdb annotation
-```{r}
-library(dada2)
-library(biomformat)
-taxa <- assignTaxonomy(ps_obj@refseq, "/mnt/disk1/DATABASES/GTDB_bac120_arc122_ssu_r202_fullTaxo.fa.gz", multithread=10)
-taxa
-ps_obj@refseq[23]
-ps_obj@tax_table[23]
-
-rownames(taxa)[23]
-taxa[23,]
-ps@sam_data$HbA1
-as.character(ps@refseq$ASV53)
-
-?octobiom::prepare_phyloseq
-ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10,prev = 0.1,taxonomic_level = 'ASV',
-                                     first = 'filter')
-#otu_table <- read.table("otu_table_filtered.tsv", header = TRUE, row.names = 1, sep = ",")
-#biom_obj <- make_biom(data = as.matrix(otu_table))
-#write_biom(biom_obj, "otu_table_filtered.tsv")
-t(ps_obj@otu_table)
-
-write.table(t(ps_obj@otu_table),'otu_table_filtered.txt',sep = "\t",
-            row.names = TRUE)
-write.csv(ps@tax_table,'tax_table.tsv')
-write.csv(ps@sam_data,'meta_16s.csv')
-```
 
 
-```{r}
-read.R
-ps_da <- readRDS('deseq2_res_table.rds')
-new_meta <- read.csv('~/16s_Arkhangelsk_paper/updated_meta_16s.csv',row.names=1)
-new_meta$new_id
-old_names <- rownames(sample_data(ps))
-new_names <- new_meta$new_id[match(old_names, rownames(new_meta))]
-otu_table(ps)
-```
 
-```{r}
-library(readr)
-# 1. Чтение данных
-data <- read.csv("~/attributes (4).tsv", header = TRUE,sep='\t')
-
-
-name_list <- c('KYH106745','KYH128797','KYH129913','KYH145956','KYH148246','KYH150630','KYH152684','KYH157702','KYH165653',
-               'KYH169316','KYH170545','KYH189064','KYH205934','KYH222697','KYH235429','KYH242378','KYH262952','KYH273737',
-               'KYH292373','KYH318934','KYH321706','KYH325469','KYH346232','KYH382659','KYH384070','KYH385410','KYH394012',
-               'KYH429822','KYH444549','KYH444685','KYH450360','KYH457149','KYH477425','KYH491256','KYH501218','KYH534580',
-               'KYH535879','KYH538373','KYH548895','KYH552241','KYH554951','KYH555588','KYH564945','KYH575691','KYH577480',
-               'KYH581545','KYH584261','KYH603364','KYH606764','KYH609626','KYH623139','KYH623361','KYH626224','KYH670613',
-               'KYH699696','KYH701560','KYH791336','KYH793447','KYH797054','KYH810920','KYH835108','KYH852816','KYH857633',
-               'KYH865564','KYH871768','KYH878246','KYH892801','KYH919200','KYH927148','KYH930282','KYH934727','KYH936965',
-               'KYH946248','KYH951729','KYH970122','KYH974592','KYH978537','KYH986107','KYH990160','KYH991090','KYH991676',
-               'KYH992172')
-data$sample_name
-
-filtered_data <- data[match(name_list, data$sample_name), ]
-filtered_data <- filtered_data[!is.na(filtered_data$sample_name), ]
-
-# или с использованием dplyr
-library(dplyr)
-filtered_data_dplyr <- data %>%
-  filter(sample_name %in% name_list) %>%
-  slice(match(name_list, sample_name))
-
-# Вывод результата
-print(filtered_data)
-print(filtered_data_dplyr)
-write_tsv(filtered_data, path = "~/filtered_data.tsv")
-
-```
-#correalation between data
-```{r,fig.height=8}
-df <- read.csv('~/DAVID_WGS/17_num_cols_df.csv')
-df <- read.csv('~/DAVID_WGS/david_all_database_2017.csv')
-df$urine_albumin_mg.L
-df_corr <- df %>% select(age,serum_creatinine_micromol.L,cystatin_C_mg.L,urine_creatinine_micromol.L,urine_albumin_mg.L)
-df_corr <- df_corr %>%
-  filter((cystatin_C_mg.L < 6) & (urine_albumin_mg.L <50) )
-library(corrplot)
-res <- cor(df_corr, method = "pearson", use = "complete.obs")
-testRes = cor.mtest(df_corr, conf.level = 0.95)
-corrplot(res, method = 'number',p.mat = testRes$p)
-
-model <- lm(age ~ urine_albumin_mg.L, data = df_corr)
-coef <- summary(model)$coefficients[2, ]
-    
-# Сохраняем результаты
-results <- data.frame(
-  coefficient = coef["Estimate"],
-  p_value = coef["Pr(>|t|)"],
-  stringsAsFactors = FALSE
-)
-all_results <- bind_rows(results) %>%
-    mutate(p_adj = p.adjust(p_value, method = "BH"))    
-ggplot(df_corr, aes(x = age, y = urine_albumin_mg.L)) +
-      geom_point(alpha = 0.6, color = "#3674B5", size = 2) +
-      geom_smooth(method = "lm", color = "#DE3163", se = TRUE, fill = "#F7B7B7") +  
-  labs(
-    x = "age",
-    y = paste0("urine_albumin_mg.L")
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(size = 11, face = "bold", hjust = 0.5),
-    axis.title = element_text(size = 10),
-    panel.border = element_rect(color = "grey", fill = NA),
-    plot.margin = unit(c(1,1,1,1), "cm"))+
-      annotate(
-        "text",
-        x = Inf, y = Inf,
-        hjust = 1.1, vjust = 1.1,
-        label = sprintf("β = %.2f\np = %.3f\np.adj = %.3f",
-                      all_results$coefficient,
-                      all_results$p_value,
-                      all_results$p_adj),
-        size = 3
-      )
-cor_data <- df %>%
-  group_by(d_sex) %>%
-  summarise(
-    cor = cor.test(d_age_b, hcd_bmi, method = "pearson")$estimate,
-    p_value = cor.test(d_age_b, hcd_bmi, method = "pearson")$p.value,
-    label = paste0("r = ", round(cor, 2), "\np = ", round(p_value, 3))
-  )
-ggplot(df, aes(x =  d_age_b, y = hcd_bmi)) +
-  geom_smooth()+
-  # Линии и точки с цветом по возрастной группе
-  #geom_line(alpha = 0.7, linewidth = 0.8) +
-  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5) +
-  
-  # Разметка графика
-  labs(
-    x = "age",
-    y = "BMI",
-    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 11),
-    axis.title = element_text(size = 13),
-    legend.position = "right",
-    strip.text = element_text(size = 11, face = "bold"),
-    panel.spacing = unit(1, "lines")
-  )+
-  facet_grid(
-    cols = vars(d_sex),  # Увеличение/уменьшение
-    #cols = vars(YEAR),               # Пол
-    scales = "free_y",              # Свободная шкала Y для каждого фасета
-  )+
-  geom_text(
-    data = cor_data,
-    aes(x = Inf, y = Inf, label = label),
-    hjust = 1.1, vjust = 1.1,
-    size = 4
-  )
-ggplot(df, aes(x =  d_age_b, y = hcd_bmi)) +
-  geom_smooth()+
-  # Линии и точки с цветом по возрастной группе
-  #geom_line(alpha = 0.7, linewidth = 0.8) +
-  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5) +
-  
-  # Разметка графика
-  labs(
-    x = "age",
-    y = "BMI",
-    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 11),
-    axis.title = element_text(size = 13),
-    legend.position = "right",
-    strip.text = element_text(size = 11, face = "bold"),
-    panel.spacing = unit(1, "lines")
-  )+
-  facet_grid(
-    cols = vars(d_sex),  # Увеличение/уменьшение
-    #cols = vars(YEAR),               # Пол
-    scales = "free_y",              # Свободная шкала Y для каждого фасета
-  )+
-  geom_text(
-    data = cor_data,
-    aes(x = Inf, y = Inf, label = label),
-    hjust = 1.1, vjust = 1.1,
-    size = 4
-  )
-
-ps_obj<- ps
-
-level <- 'Species'
-det <- 10
-prev<-5/100
-
-taxas <- core_members(ps_obj, detection = det, prevalence = prev)
-ps_obj <- prune_taxa(taxas, ps_obj)
-ps_obj_species <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
-
-# 1. Рассчитать индекс Шеннона
-data_alpha <- estimate_richness(ps_obj, measures = "Shannon")
-meta <- as(ps@sam_data,'data.frame')
-meta$age_at_heath_check_10yr
-plot_data <- meta %>%
-  select(ID_KYH,age_at_heath_check,sex,BMI,age_at_heath_check_10yr,smoking_status) %>%
-  mutate(
-    ID_KYH = factor(ID_KYH),
-    sex=as.factor(sex),
-    smoking_status = as.factor(smoking_status)
-  ) %>%
-  arrange(ID_KYH)
-
-plot_data <- merge(plot_data,data_alpha,by='row.names')
-plot_data <- plot_data %>%
-  mutate(Shannon = as.numeric(Shannon),
-         age_at_heath_check = as.numeric(age_at_heath_check),
-         BMI = as.numeric(BMI))
-
-
-shannon <- ggplot(plot_data, aes(x = age_at_heath_check, y = Shannon)) +
-  geom_smooth()+
-  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5,alpha = 0.4) +
-
-  # Разметка графика
-  labs(
-    x = "age",
-    y = "Shannon Index",
-    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 11),
-    axis.title = element_text(size = 13),
-    legend.position = "right",
-    strip.text = element_text(size = 11, face = "bold"),
-    panel.spacing = unit(1, "lines")
-  )+
-  facet_grid(
-    rows = vars(sex),  # Увеличение/уменьшение
-    #cols = vars(YEAR),               # Пол
-    scales = "free_y",              # Свободная шкала Y для каждого фасета
-  ) 
-
-bmi <- ggplot(plot_data, aes(x = age_at_heath_check, y = BMI)) +
-  geom_smooth()+
-  geom_point( shape = 21, size = 3, color = "black", stroke = 0.5,alpha = 0.4) +
-
-  # Разметка графика
-  labs(
-    x = "age",
-    y = "BMI",
-    #subtitle = "ΔShannon = Shannon(2022) - Shannon(2017)"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 11),
-    axis.title = element_text(size = 13),
-    legend.position = "right",
-    strip.text = element_text(size = 11, face = "bold"),
-    panel.spacing = unit(1, "lines")
-  )+
-  facet_grid(
-    rows = vars(sex),  # Увеличение/уменьшение
-    #cols = vars(YEAR),               # Пол
-    scales = "free_y",              # Свободная шкала Y для каждого фасета
-  ) 
-shannon | bmi
-```
 #diff_analysis
 ```{r}
 ?octobiom::prepare_phyloseq
@@ -1742,27 +1490,22 @@ heatmap_results$heatmap_plot
 
 ```
 #correlation between features and taxa
-```{r,fig.height=6}
+```{r,fig.height=6,fig.width=6}
 ?octobiom::prepare_phyloseq
 meta <- as(phyloseq::sample_data(ps),'data.frame')
-meta$mean_height_cm <- as.numeric(as.character(meta$mean_height_cm))
-meta$weight_tanita <- as.numeric(as.character(meta$weight_tanita))
-meta$bmi <- meta$weight_tanita/(meta$mean_height_cm/100)**2
+
 ps@sam_data <- sample_data(meta)
 
-ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'clr',detection = 10, prevalence = 0.05,taxonomic_level ='Genus' ,first = 'filter')
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10, prevalence = 0.05,taxonomic_level ='Genus' ,first = 'filter')
 octobiom::get_palette('set_10_4')
 
 feature_colors <- c(
-  "age_at_heath_check" = "#FF8400",
-  "bmi" = "#3C096C",
-  'hs.CRP_mg.L' = "#FF0A54",
-  'HbA1C_.'="#2D00F7",
-  'HDL_cholesterol_mmol.L' ="#029191",
-  'triglycerides_mmol.L' ="#08415C"
+  'hs.CRP_mg.L' = "#A8BF8A",
+  'HbA1C_.'="#F49AA2",
+  'HDL_cholesterol_mmol.L' ="#FCCD86",
+  'triglycerides_mmol.L' ="#89B7C2"
 )
-ps_obj@sam_data$bmi <- as.numeric(ps_obj@sam_data$bmi)
-ps_obj@sam_data$age_at_heath_check <- as.numeric(ps_obj@sam_data$age_at_heath_check)
+
 ps_obj@sam_data$`hs.CRP_mg.L` <- as.numeric(ps_obj@sam_data$`hs.CRP_mg.L`)
 ps_obj@sam_data$`HbA1C_.` <- as.numeric(ps_obj@sam_data$`HbA1C_.`)
 ps_obj@sam_data$`HDL_cholesterol_mmol.L` <- as.numeric(ps_obj@sam_data$`HDL_cholesterol_mmol.L`)
@@ -1771,17 +1514,197 @@ ps_obj@sam_data$`triglycerides_mmol.L` <- as.numeric(ps_obj@sam_data$`triglyceri
 
 network_correlation_results <- octobiom::build_multi_correlation_network(
   ps_obj,
-  features = c("age_at_heath_check", "bmi",'hs.CRP_mg.L','HbA1C_.','HDL_cholesterol_mmol.L','triglycerides_mmol.L'),
+  features = c( 'hs.CRP_mg.L','HbA1C_.','HDL_cholesterol_mmol.L','triglycerides_mmol.L'),
   tax_rank = "Genus",
-  cor_method = 'pearson',
-  feature_colors = feature_colors
+  cor_method = 'spearman',
+  feature_colors = feature_colors,
+  min_corr_strenght = 0.1,
+  p_cutoff = 0.05
 )
 network_correlation_results
 
-ps_obj@tax_table['Genus' == 'UCG-005',]
-ps_obj@tax_table %>%
-  as.data.frame()%>%
-  filter(Genus == 'UCG-005')
+
+```
+#correlation feature and taxa liner
+```{r,fig.height=10,fig.width=10}
+library(phyloseq)
+library(tidyverse)
+library(ggpubr)
+
+# Ваш phyloseq объект
+# ps <- readRDS("your_phyloseq_object.rds")
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'clr',detection = 10, prevalence = 0.05,taxonomic_level ='Genus' ,first = 'filter')
+taxa_names(ps_obj) <- ps_obj@tax_table[,'Genus']
+# Выбранные таксоны
+target_taxa <- c("Christensenellaceae R-7 group", "UCG-005","Limosilactobacillus",
+                 "Negativibacillus","[Eubacterium] xylanophilum group")
+
+# Выбранные метаданные
+target_metadata <- c('hs.CRP_mg.L', 'HbA1C_.', 'HDL_cholesterol_mmol.L', 'triglycerides_mmol.L')
+
+# Извлекаем данные
+otu_data <- as.data.frame((otu_table(ps_obj)))
+meta_data <- as(sample_data(ps_obj),'data.frame')
+
+# Фильтруем только нужные таксоны (убедитесь, что названия совпадают)
+taxa_data <- otu_data %>% 
+  select(any_of(target_taxa))
+
+# Объединяем с метаданными
+combined_data <- bind_cols(taxa_data, meta_data %>% select(any_of(target_metadata)))
+combined_data <- as.data.frame(lapply(combined_data, function(x) as.numeric(as.character(x))))
+colnames(combined_data)
+
+new_names <- c(
+  "Christensenellaceae R7 group" = "Christensenellaceae.R.7.group",
+  "UCG-005" = "UCG.005",
+  "Limosilactobacillus" = "Limosilactobacillus",
+  "Negativibacillus" = "Negativibacillus",
+  "[Eubacterium] xylanophilum group" = "X.Eubacterium..xylanophilum.group",
+  "CRP,mg/L" = "hs.CRP_mg.L",
+  "HbA1c,%" = "HbA1C_.",
+  "HDL-C,mmol/L" = "HDL_cholesterol_mmol.L",
+  "TG,mmol/L" = "triglycerides_mmol.L" 
+)
+
+# Переименовываем колонки
+combined_data <- combined_data %>%
+  rename(new_names)
+
+
+target_taxa <- colnames(combined_data[1:5])
+target_metadata <- colnames(combined_data[6:9])
+# Функция для построения корреляций с проверкой ошибок
+calculate_correlations <- function(data, taxa_cols, meta_cols) {
+  results <- data.frame()
+  all_p_values <- c()
+  
+  for (taxa in taxa_cols) {
+    for (meta_var in meta_cols) {
+      if (taxa %in% colnames(data) && meta_var %in% colnames(data)) {
+        
+        clean_data <- data %>% 
+          select(all_of(c(taxa, meta_var))) %>% 
+          filter(complete.cases(.))
+        
+        if (nrow(clean_data) >= 3) {
+          tryCatch({
+            cor_test <- cor.test(clean_data[[taxa]], clean_data[[meta_var]], 
+                                method = "pearson")
+            
+            # Создаем временный data.frame
+            temp_result <- data.frame(
+              taxa = taxa,
+              metadata = meta_var,
+              correlation = as.numeric(cor_test$estimate),
+              p_value = cor_test$p.value,
+              n_observations = nrow(clean_data)
+            )
+            
+            results <- rbind(results, temp_result)
+            all_p_values <- c(all_p_values, cor_test$p.value)
+            
+          }, error = function(e) {
+            message(paste("Error for", taxa, "and", meta_var, ":", e$message))
+          })
+        }
+      }
+    }
+  }
+  
+  # Применяем поправку Бенджамини-Хохберга
+  if (nrow(results) > 0) {
+    results$p_value_adj <- p.adjust(results$p_value, method = "BH")
+    results$significance <- ifelse(results$p_value_adj < 0.001, "***",
+                                  ifelse(results$p_value_adj < 0.01, "**",
+                                        ifelse(results$p_value_adj < 0.05, "*", "ns")))
+  }
+  
+  return(results)
+}
+
+
+plot_correlations <- function(data, taxa_cols, meta_cols, correlation_results) {
+  plots <- list()
+  
+  for (taxa in taxa_cols) {
+    for (meta_var in meta_cols) {
+      if (taxa %in% colnames(data) && meta_var %in% colnames(data)) {
+        
+        clean_data <- data %>% 
+          select(all_of(c(taxa, meta_var))) %>% 
+          filter(complete.cases(.))
+        
+        if (nrow(clean_data) >= 3) {
+          # Находим соответствующий результат корреляции
+          cor_result <- correlation_results %>%
+            filter(taxa == !!taxa & metadata == !!meta_var)
+          
+          # Создаем текст для аннотации
+          if (nrow(cor_result) > 0) {
+            cor_text <- paste0("r = ", round(cor_result$correlation, 3),
+                              " p_adj = ", round(cor_result$p_value_adj,3),
+                              " ", cor_result$significance)
+          } else {
+            cor_text <- "No correlation data"
+          }
+          
+          p <- ggplot(clean_data, aes(x = .data[[taxa]], y = .data[[meta_var]])) +
+            geom_point(alpha = 0.7, color = "#E83D8F", size = 0.5) +
+            geom_smooth(method = "lm", se = TRUE, 
+                        color = "black", fill = "#FFB6C1", alpha = 0.3) +
+            # Добавляем аннотацию с текстом корреляции
+            annotate("text", 
+                     x = Inf, y = Inf,
+                     label = cor_text,
+                     size = 5,
+                     color = "black",
+                     hjust = 1.1, vjust = 1.1,
+                     fontface = "bold") +
+            labs(x = taxa, y = meta_var) +
+            theme_minimal(base_size = 12) +
+            theme(
+              plot.background = element_rect(fill = "white", color = NA),
+              panel.background = element_rect(fill = "white", color = NA),
+              panel.grid.major = element_line(color = "grey90", size = 0.2),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(color = "black", size = 0.3),
+              axis.title = element_text(face = "bold", color = "black", size = 12),
+              axis.text = element_text(color = "black", size = 8),
+              plot.margin = margin(5, 5, 5, 5)
+            )
+          
+          plots[[paste(taxa, meta_var, sep = "_")]] <- p
+        }
+      }
+    }
+  }
+  return(plots)
+}
+
+correlation_results <- calculate_correlations(combined_data, target_taxa, target_metadata)
+
+correlation_plots <- plot_correlations(combined_data, target_taxa, target_metadata, correlation_results)
+
+# Отображаем графики
+if (length(correlation_plots) > 0) {
+  library(patchwork)
+  
+  n_cols <- 4
+  n_rows <- ceiling(length(correlation_plots) / n_cols)
+  
+  combined_plot <- wrap_plots(correlation_plots, 
+                             ncol = n_cols, 
+                             nrow = n_rows)
+  
+  print(combined_plot)
+  
+  ggsave('./figures/correlation_plots.png', combined_plot, 
+         dpi = 300, 
+         width = n_cols * 1.7,
+         height = n_rows * 1.5,
+         bg = "white")
+}
 ```
 #Dif analysis
 ```{r,fig.height=8}
@@ -2191,9 +2114,17 @@ ggsave('./figures/beta_phenotypes_batch_asv.png',beta_double,dpi=300,width=11,he
 plot(beta_double)
 ```
 #Alpha
-```{r,fig.height=5}
+```{r,fig.height=7,fig.width=8}
 ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
                                      first = 'filter')
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
 ?octobiom::create_alpha_plots
 #Let's analyze alpha diversity
 features <- c('phenotype')#,'sex',
@@ -2201,16 +2132,26 @@ features <- c('phenotype')#,'sex',
 color_palette <- octobiom::get_palette("set_10_4")
 plot_alpha_list <- purrr::map(features, ~ {
   tryCatch({
-    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon",'Simpson'))
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon",'Simpson'),size=18,text_size=5,bracket_nudge_y = 0.1)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
     return(NULL)  # Return NULL for this iteration
   })
 })
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'NONE',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+                                     first = 'filter')
+meta <- as(ps_obj@sam_data,'data.frame')
+meta <- meta %>%
+  dplyr::mutate(phenotype = recode(phenotype,
+                             `1st` = "MHN",
+                             `2nd` = "MUN",
+                             `3rd` = "MHO",
+                             `4th` = "MUO"))
+ps_obj@sam_data <- sample_data(meta)
 plot_alpha_list_chao <- purrr::map(features, ~ {
   tryCatch({
-    octobiom::create_alpha_plots(ps, col= .x, colors = color_palette,measure = c("Chao1"))
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Chao1"),size=18,text_size=5,bracket_nudge_y = 0.1)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
@@ -2220,6 +2161,10 @@ plot_alpha_list_chao <- purrr::map(features, ~ {
 plot_alpha_list_chao
 
 p <- ggpubr::ggarrange(plot_alpha_list[[1]]$plots,plot_alpha_list_chao[[1]]$plots,widths = c(2,1))
+p <- (plot_alpha_list[[1]]$plots | plot_alpha_list_chao[[1]]$plots) + 
+  plot_layout(widths = c(2, 1)) &
+  theme(plot.margin = unit(c(0.5, 0.5, 0, 0), "cm"))
+p
 ggsave('./figures/alpha_phenotype_asv.png',p,dpi=300,width=8,height=6)
 ```
 #Сети 
@@ -2248,7 +2193,19 @@ networks_results <- run_fastspar_analysis(conda_env = "fastspar",
 ```
 #metadata
 ```{r}
-df <- read.csv('/home/kuzmichenko_pa/updated_meta_16s.csv',sep=',')
-df[,c('hs.CRP_mg.L','new_id')]
-df$hs.CRP_mg.L
+df <- read.csv('./DATA/meta.csv',sep=',')
+library(dplyr)
+colnames(ps@sam_data)
+# Предположим, что ваш датафрейм называется dfзы"
+summary_table <- df %>%
+  group_by(phenotype) %>%
+  summarise(
+    age_mean = mean(age_at_heath_check, na.rm = TRUE),
+    dietary_quality_median = median(dietary_quality_score_cat, na.rm = TRUE),
+    phys_act_mean = mean(total_phys_act_index, na.rm = TRUE),
+    triglycerides_mean = mean(triglycerides_mmol.L, na.rm = TRUE),
+    HDL_cholesterol_mean = mean(HDL_cholesterol_mmol.L, na.rm = TRUE),
+    HbA1C_mean = mean(HbA1C_., na.rm = TRUE)
+    # Можно добавить и другие показатели
+  )
 ```
