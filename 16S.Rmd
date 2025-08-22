@@ -2065,7 +2065,10 @@ dev.off()
 ```
 #Beta
 ```{r,fig.height=8,fig.width=8}
-ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+library(showtext)
+#font_add_google("Times New Roman", "times")
+#octobiom::setup_plot_fonts("Times New Roman")
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'Genus',
                                      first = 'filter')
 ?octobiom::create_ordination_plots
 meta <- as(ps_obj@sam_data,'data.frame')
@@ -2103,19 +2106,21 @@ ggsave('./figures/beta_phenotypes_genus.png',plot_beta_list[[1]],dpi=300,width=1
 ggsave('./figures/beta_batch_genus.png',plot_beta_list[[2]],dpi=300,width=10,height=10)
 
 ?octobiom::create_ordination_plots_double
-beta_double <- create_ordination_plots_double(ps_obj,
-                                              group = 'phenotype',
-                                              additional_group = 'batch',
-                                              palette = color_palette,
-                                              additional_palette = additional_palette ,
-                                              shape_palette = c(1,2,3,4),ratio = c(3, 5)
-                                              )
-ggsave('./figures/beta_phenotypes_batch_asv.png',beta_double,dpi=300,width=11,height=10)
-plot(beta_double)
+#beta_double <- create_ordination_plots_double(ps_obj,
+#                                              group = 'phenotype',
+#                                              additional_group = 'batch',
+#                                              palette = color_palette,
+#                                              additional_palette = additional_palette ,
+#                                              shape_palette = c(1,2,3,4),ratio = c(3, 5)
+#                                              )
+#ggsave('./figures/beta_phenotypes_batch_asv.png',beta_double,dpi=300,width=11,height=10)
+#plot(beta_double)
 ```
 #Alpha
-```{r,fig.height=7,fig.width=8}
-ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'taxa_names',
+```{r,fig.height=7,fig.width=12}
+#?octobiom::setup
+octobiom::setup_plot_fonts("Times New Roman")
+ps_obj <- octobiom::prepare_phyloseq(ps,transformation = 'compositional',detection = 10,prev = 0.05,taxonomic_level = 'Genus',
                                      first = 'filter')
 meta <- as(ps_obj@sam_data,'data.frame')
 meta <- meta %>%
@@ -2125,14 +2130,23 @@ meta <- meta %>%
                              `3rd` = "MHO",
                              `4th` = "MUO"))
 ps_obj@sam_data <- sample_data(meta)
-?octobiom::create_alpha_plots
+#?octobiom::create_alpha_plots
 #Let's analyze alpha diversity
 features <- c('phenotype')#,'sex',
               #"smoking_status","YEAR" )
 color_palette <- octobiom::get_palette("set_10_4")
-plot_alpha_list <- purrr::map(features, ~ {
+plot_alpha_shannon <- purrr::map(features, ~ {
   tryCatch({
-    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon",'Simpson'),size=18,text_size=5,bracket_nudge_y = 0.1)
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Shannon"),size=18,text_size=8,bracket_nudge_y = 0.2)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_alpha_simpson <- purrr::map(features, ~ {
+  tryCatch({
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c('Simpson'),size=18,text_size=8,bracket_nudge_y = 0.2)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
@@ -2151,7 +2165,7 @@ meta <- meta %>%
 ps_obj@sam_data <- sample_data(meta)
 plot_alpha_list_chao <- purrr::map(features, ~ {
   tryCatch({
-    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Chao1"),size=18,text_size=5,bracket_nudge_y = 0.1)
+    octobiom::create_alpha_plots(ps_obj, col= .x, colors = color_palette,measure = c("Chao1"),size=18,text_size=8,bracket_nudge_y = 0.1)
   }, error = function(e) {
     message(paste("Error in method:", .x))
     message(e$message)  # Print the error message
@@ -2160,12 +2174,12 @@ plot_alpha_list_chao <- purrr::map(features, ~ {
 })
 plot_alpha_list_chao
 
-p <- ggpubr::ggarrange(plot_alpha_list[[1]]$plots,plot_alpha_list_chao[[1]]$plots,widths = c(2,1))
-p <- (plot_alpha_list[[1]]$plots | plot_alpha_list_chao[[1]]$plots) + 
-  plot_layout(widths = c(2, 1)) &
+p <- ggpubr::ggarrange(plot_alpha_shannon[[1]]$plots,plot_alpha_simpson[[1]]$plotsplot_alpha_list_chao[[1]]$plots)
+p
+p <- (plot_alpha_shannon[[1]]$plots | plot_alpha_simpson[[1]]$plots | plot_alpha_list_chao[[1]]$plots) + 
   theme(plot.margin = unit(c(0.5, 0.5, 0, 0), "cm"))
 p
-ggsave('./figures/alpha_phenotype_asv.png',p,dpi=300,width=8,height=6)
+ggsave('./figures/alpha_phenotype_genus.png', plot = p, width = 12, height = 6, units = "in", dpi = 300)
 ```
 #Сети 
 ```{r,fig.height=8,fig.width=8}
